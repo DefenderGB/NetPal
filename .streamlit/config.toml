@@ -1,3 +1,6 @@
+[server]
+showEmailPrompt = false
+
 [ui]
 hideTopBar = false
 
