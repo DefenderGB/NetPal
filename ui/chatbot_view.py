@@ -60,10 +60,10 @@ def render_chatbot_dialog_content(provider, model_id, model_name, region, projec
         st.caption(caption)
     
     # Create tabs for different functionalities. Allows for adding more tabs to different websites (iframes)
-    chat_tab = st.tabs(["💬 Chat"])
+    tabs = st.tabs(["💬 Chat"])
     
     # Chat Tab - Current functionality
-    with chat_tab:
+    with tabs[0]:
         # Display chat messages
         for message in st.session_state.chat_messages:
             with st.chat_message(message["role"]):
