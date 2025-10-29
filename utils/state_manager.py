@@ -32,7 +32,14 @@ class StateManager:
             
             # Create states file with default structure if it doesn't exist
             if not self.states_file.exists():
-                default_states = {"states": []}
+                default_states = {
+                    "states": [
+                        {
+                            "username": "default",
+                            "primary": ""
+                        }
+                    ]
+                }
                 with open(self.states_file, 'w', encoding='utf-8') as f:
                     json.dump(default_states, f, indent=2, ensure_ascii=False)
         except Exception as e:
