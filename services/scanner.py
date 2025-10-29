@@ -232,7 +232,7 @@ class NmapScanner:
             cmd.extend(["-sn", "-v"])
         elif scan_type == "top1000":
             cmd.extend(["-sV", "-v"])
-        elif scan_type == "full":
+        elif scan_type == "all_ports":
             cmd.extend(["-p-", "-sV", "-v"])
         elif scan_type == "custom" and custom_ports:
             cmd.extend(["-p", custom_ports, "-sV", "-v"])
