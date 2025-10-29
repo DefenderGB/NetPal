@@ -1,0 +1,143 @@
+tools:
+- name: SMB Enumeration
+  description: Enumerate SMB shares
+  ports:
+  - 139
+  - 445
+  service_names:
+  - netbios-ssn
+  - microsoft-ds
+  - smb
+  command: netexec smb {ip} --shares
+  auto_run: true
+- name: FTP Anonymous Login
+  description: Test FTP anonymous login
+  ports:
+  - 21
+  service_names:
+  - ftp
+  command: nmap -p 21 --script ftp-anon {ip}
+  auto_run: true
+- name: SSH Version Detection
+  description: Detect SSH version and algorithms
+  command: nmap -p 22 --script ssh2-enum-algos {ip}
+  ports:
+  - 22
+  service_names:
+  - ssh
+  auto_run: true
+- name: HTTP Nikto Scan
+  description: Run Nikto web scanner
+  ports:
+  - 80
+  - 8080
+  - 8000
+  service_names:
+  - http
+  - http-proxy
+  command: nikto -h http://{ip}:{port}
+  auto_run: false
+- name: HTTPS Nikto Scan
+  description: Run Nikto web scanner on HTTPS
+  ports:
+  - 443
+  - 8443
+  - 4443
+  service_names:
+  - https
+  - ssl/http
+  command: nikto -h https://{ip}:{port}
+  auto_run: false
+- name: MySQL Enumeration
+  description: Enumerate MySQL information
+  ports:
+  - 3306
+  service_names:
+  - mysql
+  command: nmap -p 3306 --script mysql-info {ip}
+  auto_run: true
+- name: MSSQL Enumeration
+  description: Enumerate MSSQL information
+  ports:
+  - 1433
+  service_names:
+  - ms-sql-s
+  - mssql
+  command: nmap -p 1433 --script ms-sql-info {ip}
+  auto_run: true
+- name: RDP Security Check
+  description: Check RDP security settings
+  ports:
+  - 3389
+  service_names:
+  - ms-wbt-server
+  - rdp
+  command: nmap -p 3389 --script rdp-enum-encryption {ip}
+  auto_run: true
+- name: SNMP Enumeration
+  description: Enumerate SNMP information
+  ports:
+  - 161
+  service_names:
+  - snmp
+  command: snmpwalk -v 2c -c public {ip}
+  auto_run: false
+- name: LDAP Enumeration
+  description: Enumerate LDAP information
+  ports:
+  - 389
+  - 636
+  service_names:
+  - ldap
+  - ldaps
+  command: nmap -p {port} --script ldap-search {ip}
+  auto_run: false
+- name: Redis Enumeration
+  description: Enumerate Redis information
+  ports:
+  - 6379
+  service_names:
+  - redis
+  command: nmap -p 6379 --script redis-info {ip}
+  auto_run: true
+- name: MongoDB Enumeration
+  description: Enumerate MongoDB information
+  ports:
+  - 27017
+  service_names:
+  - mongodb
+  command: nmap -p 27017 --script mongodb-info {ip}
+  auto_run: true
+- name: DNS Zone Transfer
+  description: Attempt DNS zone transfer
+  ports:
+  - 53
+  service_names:
+  - domain
+  - dns
+  command: dig axfr @{ip}
+  auto_run: false
+- name: Telnet Banner Grab
+  description: Grab Telnet banner
+  ports:
+  - 23
+  service_names:
+  - telnet
+  command: nmap -p 23 --script banner {ip}
+  auto_run: true
+- name: HTTPX Screenshot
+  description: Take screenshot of web service
+  command: httpx -u {protocol}://{ip}:{port} -screenshot -srd {srd} --silent -disable-update-check
+  ports:
+  - 80
+  - 443
+  - 8080
+  - 8443
+  - 8000
+  - 4443
+  service_names:
+  - http
+  - https
+  - ssl/http
+  - http-proxy
+  auto_run: true

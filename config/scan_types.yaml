@@ -1,0 +1,26 @@
+scan_types:
+- id: ping
+  name: Ping Scan
+  description: Host discovery only - quickly identify which hosts are up
+  help_text: Fast scan to discover active hosts on the network
+  nmap_flags: -sn
+  priority: 1
+- id: top1000
+  name: Top 1000 Ports
+  description: Scan the most common 1000 TCP ports
+  help_text: Balanced scan covering the most frequently used ports and version scan
+  nmap_flags: --top-ports 1000 -sV
+  priority: 2
+- id: all_ports
+  name: All Port Scan
+  description: Scan target against all ports
+  help_text: Scan target against all ports
+  nmap_flags: -p-
+  priority: 3
+- id: custom
+  name: Custom Ports
+  description: Specify custom ports to scan
+  help_text: Enter specific ports (e.g., 22,80,443) or ranges (e.g., 1-1000)
+  requires_input: true
+  input_placeholder: 22,80,443 
+  priority: 4

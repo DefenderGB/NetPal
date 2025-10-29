@@ -1,0 +1,13 @@
+streamlit>=1.28.0
+pandas>=1.5.0,<2.0.0
+watchdog>=3.0.0
+streamlit-agraph>=0.0.45
+python-nmap>=0.7.1
+PyYAML>=6.0.1
+xmltodict>=0.13.0
+plotly>=5.17.0
+Pillow>=10.0.0
+pyarrow>=10.0.1,<15.0.0
+boto3>=1.28.0
+requests>=2.31.0
+openai>=1.0.0

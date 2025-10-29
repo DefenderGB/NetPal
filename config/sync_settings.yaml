@@ -1,0 +1,8 @@
+aws:
+  profile: 
+  region: us-east-1
+dynamodb:
+  projects_table: netpal-projects
+  states_table: netpal-states
+s3:
+  bucket: 
