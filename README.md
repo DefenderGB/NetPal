@@ -35,15 +35,33 @@ NetPal is a network penetration testing tool built with Python and Streamlit. It
 
 ## Installation
 
-You have two installation options:
+### Prerequisites
 
-### Option 1: One Line Bash script
+NetPal uses pipx to manage its dependencies. Install pipx first:
+
+**macOS:**
+```bash
+brew install pipx
+pipx ensurepath
+```
+ 
+**Linux:**
+```bash
+python3 -m pip install --user pipx
+pipx ensurepath
+```
+ 
+After installing pipx, restart your terminal or run `source ~/.bashrc` (or `~/.zshrc`).
+ 
+### Quick Setup
+ 
+**Option 1: One-line installer**
 
 ```bash
 curl 'https://raw.githubusercontent.com/DefenderGB/NetPal/refs/heads/main/oneline.sh' | bash
 ```
 
-### Option 2: Clone + Virtual Environment
+**Option 2: Manual installation**
 
 Creates an isolated Python environment for the project:
 
@@ -52,16 +70,15 @@ Creates an isolated Python environment for the project:
 git clone https://github.com/DefenderGB/NetPal.git
 cd NetPal
 
-# Run setup (creates venv, installs dependencies, configures AWS)
+# Run setup (installs streamlit via pipx, injects dependencies, configures AWS)
 bash setup.sh
 
-# Sets python venv and runs app 
+# Run the app
 bash run.sh
 ```
 
-Or manually setup python venv:
+Or run directly:
 ```bash
-source venv/bin/activate
 streamlit run app.py
 ```
 
@@ -280,15 +297,26 @@ Variables available in commands:
 
 **"Failed to build pandas/pyarrow" errors:**
 
-This occurs when trying to install outside a virtual environment or when build tools are missing:
+NetPal now uses pipx to avoid these compilation errors. The pipx installation downloads pre-built binary wheels instead of compiling from source.
 
-Use virtual environment (recommended):
+If you encounter this error:
+1. Ensure pipx is installed: `pipx --version`
+2. Run the setup script: `bash setup.sh`
+3. The setup script will automatically install streamlit via pipx and inject all dependencies
+ 
+**"Module not found" errors:**
+ 
+If you get errors about missing modules (like `xmltodict` or `watchdog`):
 ```bash
+# Re-run setup to inject all dependencies
 bash setup.sh
-bash run.sh
 ```
 
-The system installer uses `--prefer-binary` flag to download pre-built wheels instead of compiling from source, which avoids CMake errors.
+Or manually inject the missing package:
+
+```bash
+pipx inject streamlit <package-name>
+```
 
 ### Cloud Sync Issues
 
