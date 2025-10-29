@@ -175,7 +175,7 @@ def validate_scan_configuration(
     
     Args:
         target: Target network/IP (if direct target)
-        scan_type: Type of scan (ping, top1000, custom, full)
+        scan_type: Type of scan (ping, top1000, custom, all_ports)
         custom_ports: Custom port specification (if scan_type is custom)
         interface: Network interface name (optional)
         target_file: Path to file containing targets (if file-based)
@@ -187,7 +187,7 @@ def validate_scan_configuration(
         - (False, error_message) if any validation fails
     """
     # Validate scan type
-    valid_scan_types = ["ping", "top1000", "custom", "full"]
+    valid_scan_types = ["ping", "top1000", "all_ports", "custom"]
     if scan_type and scan_type not in valid_scan_types:
         return False, f"Invalid scan type: {scan_type}. Must be one of: {', '.join(valid_scan_types)}"
     
