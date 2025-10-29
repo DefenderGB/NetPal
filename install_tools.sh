@@ -74,16 +74,6 @@ install_nmap() {
 
 # Install nuclei
 install_nuclei() {
-    echo ""
-    
-    # Check if running on dev-dsk host
-    HOSTNAME=$(hostname)
-    if [[ "$HOSTNAME" == *"dev-dsk-"* ]]; then
-        echo "⚠️  Skipping nuclei installation"
-        echo "   Nuclei should not be installed on dev-dsk hosts"
-        echo "   Use your local machine for security scanning"
-        return 1
-    fi
     
     echo "Installing nuclei..."
     if command -v go &> /dev/null; then
