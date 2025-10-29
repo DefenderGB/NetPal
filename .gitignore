@@ -4,8 +4,6 @@ data/output/*
 data/screenshots/*
 venv
 scan_results/*
-.roo.md
-todo.txt
 __pycache__
 **/__pycache__
 config/user.txt
