@@ -133,7 +133,7 @@ class NucleiScanner:
         logger.info("Updating Nuclei templates...")
         
         if output_callback:
-            output_callback(MsgFmt.package("Updating Nuclei templates..."))
+            output_callback(MsgFmt.info("Updating Nuclei templates..."))
         
         try:
             # Use -ut flag for template update (works in Nuclei v2 and v3+)
@@ -543,7 +543,7 @@ class NucleiScanner:
                 else:
                     output_callback(MsgFmt.success("Scan completed - No vulnerabilities found"))
                 
-                output_callback(MsgFmt.file_info(f"Scan output saved to: {output_filepath}"))
+                output_callback(MsgFmt.file_created(f"Scan output saved to: {output_filepath}"))
             
             self._current_process = None  # Clear process reference
             return findings, "", output_filepath
