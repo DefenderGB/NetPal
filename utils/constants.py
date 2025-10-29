@@ -5,7 +5,7 @@ This module provides centralized constants for severity levels, port definitions
 dialog names, and other shared configuration values.
 """
 
-from typing import Dict, List
+from typing import Any, Dict, List
 
 # ============================================================================
 # DIALOG NAMES
