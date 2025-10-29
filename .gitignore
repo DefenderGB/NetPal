@@ -1,7 +1,7 @@
+data/states.json
 data/projects/*
 data/output/*
 data/screenshots/*
-#data/states.json
 venv
 scan_results/*
 .roo.md

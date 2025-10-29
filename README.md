@@ -37,11 +37,21 @@ NetPal is a network penetration testing tool built with Python and Streamlit. It
 
 You have two installation options:
 
-### Option 1: Virtual Environment (Recommended)
+### Option 1: One Line Bash script
+
+```bash
+curl 'https://raw.githubusercontent.com/DefenderGB/NetPal/refs/heads/main/oneline.sh' | bash
+```
+
+### Option 2: Clone + Virtual Environment
 
 Creates an isolated Python environment for the project:
 
 ```bash
+# Clone Repo
+git clone https://github.com/DefenderGB/NetPal.git
+cd NetPal
+
 # Run setup (creates venv, installs dependencies, configures AWS)
 bash setup.sh
 
@@ -49,7 +59,7 @@ bash setup.sh
 bash run.sh
 ```
 
-Or manually:
+Or manually setup python venv:
 ```bash
 source venv/bin/activate
 streamlit run app.py
