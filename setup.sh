@@ -20,7 +20,7 @@ fi
 # Check if streamlit is installed via pipx
 if ! pipx list 2>/dev/null | grep -q "streamlit"; then
     echo "[INFO] Installing streamlit via pipx..."
-    pipx install streamlit
+    pipx install streamlit --pip-args='--prefer-binary'
     if [ $? -ne 0 ]; then
         echo "❌ Failed to install streamlit via pipx"
         exit 1
@@ -48,7 +48,7 @@ while IFS= read -r line || [ -n "$line" ]; do
     
     if [ -n "$package" ]; then
         echo "  → Injecting $package..."
-        pipx inject streamlit "$package" --quiet 2>/dev/null || echo "    ⚠️  $package may already be installed"
+        pipx inject streamlit "$package" --pip-args='--prefer-binary' --quiet 2>/dev/null || echo "    ⚠️  $package may already be installed"
     fi
 done < requirements.txt
  
