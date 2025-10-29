@@ -5,20 +5,54 @@ echo "NetPal Setup"
 echo "================================"
 echo ""
 
-# Create virtual environment
-echo "[INFO] Creating python virtual environment..."
-python3 -m venv venv
+# Check if pipx is installed
+if ! command -v pipx &> /dev/null; then
+    echo "❌ pipx is not installed!"
+    echo ""
+    echo "Please install pipx first:"
+    echo "  macOS: brew install pipx"
+    echo "  Linux: python3 -m pip install --user pipx"
+    echo ""
+    echo "After installing pipx, run: pipx ensurepath"
+    exit 1
+fi
 
-# Activate virtual environment
-source venv/bin/activate
+# Check if streamlit is installed via pipx
+if ! pipx list 2>/dev/null | grep -q "streamlit"; then
+    echo "[INFO] Installing streamlit via pipx..."
+    pipx install streamlit
+    if [ $? -ne 0 ]; then
+        echo "❌ Failed to install streamlit via pipx"
+        exit 1
+    fi
+    echo "✅ Streamlit installed successfully"
+else
+    echo "✅ Streamlit already installed via pipx"
+fi
+ 
+echo "[INFO] Installing dependencies via pipx inject..."
 
-# Upgrade pip
-echo "[INFO] Upgrading pip..."
-pip install --upgrade pip
-
-# Install dependencies
-echo "[INFO] Installing dependencies..."
-pip install -r requirements.txt
+# Read dependencies from requirements.txt and inject them
+# Skip version specifiers and comments
+while IFS= read -r line || [ -n "$line" ]; do
+    # Skip empty lines and comments
+    [[ -z "$line" || "$line" =~ ^[[:space:]]*# ]] && continue
+    
+    # Extract package name (before any version specifier)
+    package=$(echo "$line" | sed 's/[>=<~!].*//' | xargs)
+    
+    # Skip streamlit itself since it's the main package
+    if [ "$package" = "streamlit" ]; then
+        continue
+    fi
+    
+    if [ -n "$package" ]; then
+        echo "  → Injecting $package..."
+        pipx inject streamlit "$package" --quiet 2>/dev/null || echo "    ⚠️  $package may already be installed"
+    fi
+done < requirements.txt
+ 
+echo "✅ Dependencies injected into pipx streamlit environment"
 
 # Install tools
 echo "[INFO] Installing Security tools..."
