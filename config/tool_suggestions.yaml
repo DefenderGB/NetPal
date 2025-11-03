@@ -1,0 +1,593 @@
+tools:
+- name: SMB Enumeration
+  description: Enumerate SMB shares
+  ports:
+  - 139
+  - 445
+  service_names:
+  - netbios-ssn
+  - microsoft-ds
+  - smb
+  command: netexec smb {ip} --shares
+  auto_run: true
+- name: FTP Anonymous Login
+  description: Test FTP anonymous login
+  command: nmap -p {port} --script ftp-anon {ip}
+  ports:
+  - 21
+  service_names:
+  - ftp
+  auto_run: true
+- name: SSH Version Detection
+  description: Detect SSH version and algorithms
+  command: nmap -p {port} --script ssh2-enum-algos {ip}
+  ports:
+  - 22
+  service_names:
+  - ssh
+  auto_run: true
+- name: Nikto Scan
+  description: Run Nikto web scanner
+  command: nikto -h {protocol}://{ip}:{port}
+  ports:
+  - 80
+  - 443
+  - 4443
+  - 8080
+  - 8443
+  - 8000
+  service_names:
+  - http
+  - http-proxy
+  - https
+  - ssl/http
+  auto_run: false
+- name: MySQL Enumeration
+  description: Enumerate MySQL information
+  command: nmap -p {port} --script mysql-info {ip}
+  ports:
+  - 3306
+  service_names:
+  - mysql
+  auto_run: true
+- name: MSSQL Enumeration
+  description: Enumerate MSSQL information
+  command: nmap -p {port} --script ms-sql-info {ip}
+  ports:
+  - 1433
+  service_names:
+  - ms-sql-s
+  - mssql
+  auto_run: true
+- name: RDP Security Check
+  description: Check RDP security settings
+  command: nmap -p {port} --script rdp-enum-encryption {ip}
+  ports:
+  - 3389
+  service_names:
+  - ms-wbt-server
+  - rdp
+  auto_run: true
+- name: SNMP Enumeration
+  description: Enumerate SNMP information
+  ports:
+  - 161
+  service_names:
+  - snmp
+  command: snmpwalk -v 2c -c public {ip}
+  auto_run: false
+- name: LDAP Enumeration
+  description: Enumerate LDAP information
+  ports:
+  - 389
+  - 636
+  service_names:
+  - ldap
+  - ldaps
+  command: nmap -p {port} --script ldap-search {ip}
+  auto_run: false
+- name: Redis Enumeration
+  description: Enumerate Redis information
+  command: nmap -p {port} --script redis-info {ip}
+  ports:
+  - 6379
+  service_names:
+  - redis
+  auto_run: true
+- name: MongoDB Enumeration
+  description: Enumerate MongoDB information
+  command: nmap -p {port} --script mongodb-info {ip}
+  ports:
+  - 27017
+  service_names:
+  - mongodb
+  auto_run: true
+- name: DNS Zone Transfer
+  description: Attempt DNS zone transfer
+  ports:
+  - 53
+  service_names:
+  - domain
+  - dns
+  command: dig axfr @{ip}
+  auto_run: false
+- name: Telnet Banner Grab
+  description: Grab Telnet banner
+  command: nmap -p {port} --script banner {ip}
+  ports:
+  - 23
+  service_names:
+  - telnet
+  auto_run: true
+- name: HTTPX Screenshot
+  description: Take screenshot of web service
+  command: httpx -u {protocol}://{ip}:{port} -screenshot -srd {srd} --silent -disable-update-check
+  ports:
+  - 80
+  - 443
+  - 7443
+  - 8080
+  - 8443
+  - 8000
+  - 4443
+  service_names:
+  - http
+  - https
+  - ssl/http
+  - http-proxy
+  - vnc-http
+  - ccproxy-http
+  - http-rpc-epmap
+  - soap-http
+  - http-alt
+  auto_run: true
+- name: SMB Signing Check
+  description: Check if SMB signing is enabled/required
+  ports:
+  - 139
+  - 445
+  service_names:
+  - netbios-ssn
+  - microsoft-ds
+  - smb
+  command: nmap -p {port} --script smb-security-mode,smb2-security-mode {ip}
+  auto_run: true
+- name: SMB Vulnerability Scan
+  description: Scan for common SMB vulnerabilities (EternalBlue, etc.)
+  ports:
+  - 139
+  - 445
+  service_names:
+  - netbios-ssn
+  - microsoft-ds
+  - smb
+  command: nmap -p {port} --script smb-vuln* {ip}
+  auto_run: true
+- name: NetBIOS Enumeration
+  description: Enumerate NetBIOS information
+  ports:
+  - 137
+  - 138
+  - 139
+  service_names:
+  - netbios-ns
+  - netbios-dgm
+  - netbios-ssn
+  command: nbtscan {ip}
+  auto_run: true
+- name: iSCSI Discovery
+  description: Discover iSCSI targets
+  ports:
+  - 3260
+  service_names:
+  - iscsi
+  command: nmap -p {port} --script iscsi-info {ip}
+  auto_run: true
+- name: VNC Authentication Check
+  description: Check VNC authentication methods
+  ports:
+  - 5900
+  - 5901
+  - 5902
+  service_names:
+  - vnc
+  - vnc-http
+  command: nmap -p {port} --script vnc-info,realvnc-auth-bypass {ip}
+  auto_run: true
+- name: RPC Enumeration
+  description: Enumerate RPC services
+  ports:
+  - 111
+  - 135
+  service_names:
+  - rpcbind
+  - msrpc
+  command: nmap -p {port} --script rpcinfo {ip}
+  auto_run: true
+- name: NFS Share Enumeration
+  description: Enumerate NFS shares
+  ports:
+  - 2049
+  service_names:
+  - nfs
+  command: nmap -p {port} --script nfs-ls,nfs-showmount,nfs-statfs {ip}
+  auto_run: true
+- name: SNMP Community String Brute Force
+  description: Brute force SNMP community strings
+  ports:
+  - 161
+  service_names:
+  - snmp
+  command: nmap -p {port} --script snmp-brute {ip}
+  auto_run: false
+- name: SNMP System Info
+  description: Extract system information via SNMP
+  ports:
+  - 161
+  service_names:
+  - snmp
+  command: nmap -p {port} --script snmp-sysdescr,snmp-processes,snmp-netstat {ip}
+  auto_run: false
+- name: Cisco Smart Install Exploit Check
+  description: Check for Cisco Smart Install vulnerability
+  ports:
+  - 4786
+  service_names:
+  - smart-install
+  command: nmap -p {port} --script cisco-smart-install {ip}
+  auto_run: true
+- name: SSH Weak Algorithms
+  description: Detect weak SSH algorithms and ciphers
+  ports:
+  - 22
+  service_names:
+  - ssh
+  command: nmap -p {port} --script ssh-auth-methods,ssh2-enum-algos {ip}
+  auto_run: true
+- name: SSH Brute Force Check
+  description: Test SSH for brute force protection
+  ports:
+  - 22
+  service_names:
+  - ssh
+  command: nmap -p {port} --script ssh-brute --script-args userdb=users.txt,passdb=pass.txt,brute.firstonly=true
+    {ip}
+  auto_run: false
+- name: RDP NLA Check
+  description: Check if RDP has Network Level Authentication enabled
+  ports:
+  - 3389
+  service_names:
+  - ms-wbt-server
+  - rdp
+  command: nmap -p {port} --script rdp-ntlm-info {ip}
+  auto_run: true
+- name: RDP Vulnerability Scan
+  description: Scan for RDP vulnerabilities (BlueKeep, etc.)
+  ports:
+  - 3389
+  service_names:
+  - ms-wbt-server
+  - rdp
+  command: nmap -p {port} --script rdp-vuln-ms12-020 {ip}
+  auto_run: false
+- name: FTP Bounce Attack
+  description: Test for FTP bounce attack vulnerability
+  ports:
+  - 21
+  service_names:
+  - ftp
+  command: nmap -p {port} --script ftp-bounce {ip}
+  auto_run: false
+- name: FTP Brute Force
+  description: Brute force FTP credentials
+  ports:
+  - 21
+  service_names:
+  - ftp
+  command: nmap -p {port} --script ftp-brute {ip}
+  auto_run: false
+- name: Telnet Encryption Check
+  description: Check if Telnet supports encryption
+  ports:
+  - 23
+  service_names:
+  - telnet
+  command: nmap -p {port} --script telnet-encryption {ip}
+  auto_run: true
+- name: Telnet Brute Force
+  description: Brute force Telnet credentials
+  ports:
+  - 23
+  service_names:
+  - telnet
+  command: nmap -p {port} --script telnet-brute {ip}
+  auto_run: false
+- name: LDAP Anonymous Bind
+  description: Test for LDAP anonymous bind
+  ports:
+  - 389
+  - 636
+  service_names:
+  - ldap
+  - ldaps
+  command: nmap -p {port} --script ldap-rootdse {ip}
+  auto_run: false
+- name: DNS Service Discovery
+  description: Enumerate DNS service records
+  ports:
+  - 53
+  service_names:
+  - domain
+  - dns
+  command: nmap -p {port} --script dns-service-discovery {ip}
+  auto_run: false
+- name: DNS Recursion Check
+  description: Check if DNS allows recursive queries
+  ports:
+  - 53
+  service_names:
+  - domain
+  - dns
+  command: nmap -p {port} --script dns-recursion {ip}
+  auto_run: false
+- name: IPMI Version Detection
+  description: Detect IPMI version and cipher suites
+  ports:
+  - 623
+  service_names:
+  - ipmi
+  - asf-rmcp
+  command: nmap -p {port} -sU --script ipmi-version,ipmi-cipher-zero {ip}
+  auto_run: true
+- name: Printer JetDirect Info
+  description: Extract information from HP JetDirect printers
+  ports:
+  - 9100
+  service_names:
+  - jetdirect
+  - pdl-datastream
+  command: nmap -p {port} --script pjl-ready-message {ip}
+  auto_run: true
+- name: RTSP Methods Enumeration
+  description: Enumerate RTSP methods
+  ports:
+  - 554
+  service_names:
+  - rtsp
+  command: nmap -p {port} --script rtsp-methods {ip}
+  auto_run: true
+- name: SIP Methods Enumeration
+  description: Enumerate SIP methods
+  ports:
+  - 5060
+  - 5061
+  service_names:
+  - sip
+  - sip-tls
+  command: nmap -p {port} --script sip-methods,sip-enum-users {ip}
+  auto_run: false
+- name: MQTT Information Gathering
+  description: Gather MQTT broker information
+  ports:
+  - 1883
+  - 8883
+  service_names:
+  - mqtt
+  command: nmap -p {port} --script mqtt-subscribe {ip}
+  auto_run: true
+- name: Modbus Device Identification
+  description: Identify Modbus devices
+  ports:
+  - 502
+  service_names:
+  - modbus
+  command: nmap -p {port} --script modbus-discover {ip}
+  auto_run: true
+- name: BACnet Device Discovery
+  description: Discover BACnet devices
+  ports:
+  - 47808
+  service_names:
+  - bacnet
+  command: nmap -p {port} -sU --script bacnet-info {ip}
+  auto_run: true
+- name: UPnP Device Discovery
+  description: Discover UPnP devices and services
+  ports:
+  - 1900
+  service_names:
+  - upnp
+  command: nmap -p {port} -sU --script upnp-info {ip}
+  auto_run: true
+- name: Memcached Enumeration
+  description: Enumerate Memcached information
+  ports:
+  - 11211
+  service_names:
+  - memcache
+  command: nmap -p {port} --script memcached-info {ip}
+  auto_run: true
+- name: Elasticsearch Info
+  description: Gather Elasticsearch cluster information
+  ports:
+  - 9200
+  - 9300
+  service_names:
+  - elasticsearch
+  command: nmap -p {port} --script elasticsearch-info {ip}
+  auto_run: true
+- name: Cassandra Info
+  description: Gather Cassandra database information
+  ports:
+  - 9042
+  - 9160
+  service_names:
+  - cassandra
+  command: nmap -p {port} --script cassandra-info {ip}
+  auto_run: true
+- name: Docker API Enumeration
+  description: Enumerate Docker API
+  ports:
+  - 2375
+  - 2376
+  service_names:
+  - docker
+  command: nmap -p {port} --script docker-version {ip}
+  auto_run: true
+- name: Kubernetes API Discovery
+  description: Discover Kubernetes API endpoints
+  ports:
+  - 6443
+  - 8080
+  - 10250
+  service_names:
+  - kubernetes
+  command: nmap -p {port} --script http-title {ip}
+  auto_run: true
+- name: X11 Access Check
+  description: Check X11 server access
+  ports:
+  - 6000
+  - 6001
+  service_names:
+  - x11
+  command: nmap -p {port} --script x11-access {ip}
+  auto_run: true
+- name: VNC Brute Force
+  description: Brute force VNC passwords
+  ports:
+  - 5900
+  - 5901
+  service_names:
+  - vnc
+  command: nmap -p {port} --script vnc-brute {ip}
+  auto_run: false
+- name: PostgreSQL Info
+  description: Gather PostgreSQL database information
+  ports:
+  - 5432
+  service_names:
+  - postgresql
+  command: nmap -p {port} --script pgsql-brute {ip}
+  auto_run: false
+- name: Oracle TNS Version
+  description: Detect Oracle TNS listener version
+  ports:
+  - 1521
+  - 1522
+  service_names:
+  - oracle-tns
+  command: nmap -p {port} --script oracle-tns-version {ip}
+  auto_run: true
+- name: AMQP Info
+  description: Gather AMQP (RabbitMQ) information
+  ports:
+  - 5672
+  service_names:
+  - amqp
+  command: nmap -p {port} --script amqp-info {ip}
+  auto_run: true
+- name: Rsync List Modules
+  description: List available Rsync modules
+  ports:
+  - 873
+  service_names:
+  - rsync
+  command: nmap -p {port} --script rsync-list-modules {ip}
+  auto_run: true
+- name: AJP Service Info
+  description: Gather Apache JServ Protocol information
+  ports:
+  - 8009
+  service_names:
+  - ajp13
+  command: nmap -p {port} --script ajp-methods,ajp-request {ip}
+  auto_run: true
+- name: Citrix Enumeration
+  description: Enumerate Citrix services
+  ports:
+  - 1494
+  - 2598
+  service_names:
+  - citrix-ica
+  command: nmap -p {port} --script citrix-enum-apps {ip}
+  auto_run: true
+- name: TFTP Enumeration
+  description: Enumerate TFTP server
+  ports:
+  - 69
+  service_names:
+  - tftp
+  command: nmap -p {port} -sU --script tftp-enum {ip}
+  auto_run: false
+- name: Socks Proxy Detection
+  description: Detect and test SOCKS proxy
+  ports:
+  - 1080
+  service_names:
+  - socks
+  command: nmap -p {port} --script socks-open-proxy {ip}
+  auto_run: true
+- name: HTTP Proxy Detection
+  description: Detect open HTTP proxy
+  ports:
+  - 3128
+  - 8080
+  service_names:
+  - http-proxy
+  - squid-http
+  command: nmap -p {port} --script http-open-proxy {ip}
+  auto_run: true
+- name: SMTP Enumeration
+  description: Enumerate SMTP users and commands
+  ports:
+  - 25
+  - 587
+  service_names:
+  - smtp
+  command: nmap -p {port} --script smtp-commands,smtp-enum-users {ip}
+  auto_run: false
+- name: POP3 Capabilities
+  description: Enumerate POP3 capabilities
+  ports:
+  - 110
+  - 995
+  service_names:
+  - pop3
+  - pop3s
+  command: nmap -p {port} --script pop3-capabilities {ip}
+  auto_run: true
+- name: IMAP Capabilities
+  description: Enumerate IMAP capabilities
+  ports:
+  - 143
+  - 993
+  service_names:
+  - imap
+  - imaps
+  command: nmap -p {port} --script imap-capabilities {ip}
+  auto_run: true
+- name: BloodHound CE Python
+  description: Run BloodHound CE Python collector with credential brute force
+  ports:
+  - 389
+  - 636
+  - 3268
+  service_names:
+  - ldap
+  - ldaps
+  command: bloodhound-ce-python -ns {ip} -u '{username}' -p '{password}' -d '{domain}'
+    -c all
+  auto_run: false
+- name: SMB Credential Test
+  description: Test SMB credentials with NetExec
+  ports:
+  - 139
+  - 445
+  service_names:
+  - netbios-ssn
+  - microsoft-ds
+  - smb
+  command: netexec smb {ip} -u '{username}' -p '{password}' --shares
+  auto_run: false

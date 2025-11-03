@@ -1,0 +1,11 @@
+data/states.json
+data/projects/*
+data/output/*
+data/screenshots/*
+venv
+scan_results/*
+__pycache__
+**/__pycache__
+config/user.txt
+config/credentials.json
+.DS_Store

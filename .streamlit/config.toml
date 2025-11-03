@@ -1,0 +1,89 @@
+[server]
+showEmailPrompt = false
+
+[ui]
+hideTopBar = false
+
+[client]
+toolbarMode = "viewer"
+
+[browser]
+gatherUsageStats = false
+
+[theme]
+# Base theme: "light" or "dark"
+base = "dark"
+
+# Primary accent color (used for active buttons, primary actions, links)
+# Currently used in: app.py sidebar navigation buttons (#8B5CF6)
+primaryColor = "#8B5CF6"
+
+# Background color of the main app area
+# Default dark theme: #0E1117
+backgroundColor = "#1f232bff"
+
+# Background color for interactive widgets and secondary areas
+# Default dark theme: #262730
+# Currently used implicitly in: network graph container
+secondaryBackgroundColor = "#1c2a47ff"
+
+# Color used for almost all text
+# Default dark theme: #FAFAFA
+textColor = "#FAFAFA"
+
+# Semantic colors for findings and severity levels
+# Critical/High severity findings, error states, network nodes with findings
+# Currently used in: network_view.py (#FF6B6B), findings_view.py (CVSS >= 7)
+redColor = "#FF6B6B"
+
+# Medium severity findings, warnings
+# Currently used in: findings_view.py (CVSS 4-6.9)
+orangeColor = "#FFA500"
+
+# Yellow/Gold for highlights and warnings
+# Currently used in: network_view.py graph highlight (#F7CA18)
+yellowColor = "#F7CA18"
+
+# Info level findings, interactive elements
+# Default: #1c83e1 (light), #0068c9 (dark)
+blueColor = "#3D9DF3"
+
+# Success states, low severity findings, host nodes
+# Currently used in: network_view.py (#4ECDC4), findings_view.py (CVSS < 4)
+greenColor = "#4ECDC4"
+
+# Neutral/gray elements - edges, borders, service nodes
+# Currently used in: network_view.py edges (#95A5A6, #BDC3C7), service nodes (#95E1D3)
+grayColor = "#95A5A6"
+
+# Border color around elements
+# Currently used in: network_view.py graph iframe border (#ddd)
+borderColor = "#3D3D3D"
+
+# Link styling
+linkColor = "#8B5CF6"
+linkUnderline = false
+
+# Corner radius for UI elements
+baseRadius = "0.5rem"
+
+# Corner radius for buttons specifically
+buttonRadius = "0.5rem"
+
+# Font settings
+font = "sans-serif"
+baseFontSize = 16
+baseFontWeight = 400
+
+# Widget border visibility
+showWidgetBorder = true
+
+# Sidebar border visibility
+showSidebarBorder = true
+
+# Note: The following CSS styling CANNOT be moved here and must remain in code:
+# - Custom CSS selectors (.stAgraph, iframe selectors)
+# - Structural properties (padding, margin, specific border-radius overrides)
+# - Hover state styling (:hover pseudo-selectors)
+# - Conditional color logic (e.g., red if findings present)
+# - !important flag overrides
