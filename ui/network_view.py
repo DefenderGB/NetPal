@@ -689,7 +689,8 @@ def _scan_single_host(scanner, target_ip, scan_type, custom_ports, project_name,
             project_name=project_name,
             is_active_hosts=False,
             interface=network_interface,
-            skip_host_discovery=skip_host_discovery
+            skip_host_discovery=skip_host_discovery,
+            process_chunk_callback=process_chunk_callback
         )
 
 
@@ -738,7 +739,8 @@ def _scan_list_endpoints(scanner, target_network, scan_type, custom_ports,
                 project_name=project_name,
                 is_active_hosts=True,
                 interface=network_interface,
-                skip_host_discovery=skip_host_discovery
+                skip_host_discovery=skip_host_discovery,
+                process_chunk_callback=process_chunk_callback
             )
         else:
             return scanner.scan_ip_list(
@@ -800,7 +802,8 @@ def _scan_active_hosts(scanner, target_data, scan_type, custom_ports,
                 project_name=project_name,
                 is_active_hosts=True,
                 interface=network_interface,
-                skip_host_discovery=skip_host_discovery
+                skip_host_discovery=skip_host_discovery,
+                process_chunk_callback=process_chunk_callback
             )
         else:
             return scanner.scan_ip_list(
@@ -2090,10 +2093,6 @@ def _render_scan_interface_core(
             )
             
             # Process results
-            # Only skip auto-tools if hosts were already processed by chunk callback
-            # (they would already be in the network if chunking occurred)
-            hosts_already_in_network = all(scan_network.get_host(h.ip) is not None for h in hosts) if hosts else False
-            
             _process_scan_results(
                 hosts=hosts,
                 error=error,
@@ -2103,7 +2102,7 @@ def _render_scan_interface_core(
                 project=project,
                 network=scan_network,
                 st_session_state=st.session_state,
-                skip_auto_tools=hosts_already_in_network,
+                skip_auto_tools=False,
                 cmd_output=cmd_output
             )
         except Exception as e:

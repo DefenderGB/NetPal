@@ -121,7 +121,7 @@ tools:
   auto_run: true
 - name: HTTPX Screenshot
   description: Take screenshot of web service
-  command: httpx -u {protocol}://{ip}:{port} -screenshot -srd {srd} --silent -disable-update-check
+  command: httpx -u {protocol}://{ip}:{port} -screenshot -srd {srd} -disable-update-check -ho '--no-sandbox'
   ports:
   - 80
   - 443

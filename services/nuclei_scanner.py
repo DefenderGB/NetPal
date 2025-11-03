@@ -346,13 +346,11 @@ class NucleiScanner:
             # Build Nuclei command with modern flags
             # -u: target URL
             # -jsonl: JSON Lines output (modern Nuclei v3+)
-            # -silent: suppress progress bar in output
             # -no-color: disable colored output for parsing
             cmd = [
                 self.nuclei_path,
                 "-u", target,
                 "-jsonl",
-                "-silent",
                 "-no-color"
             ]
             

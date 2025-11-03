@@ -35,4 +35,4 @@ scan_types:
   description: Scan all common web ports
   help_text: Scan all common web ports
   priority: 4
-  nmap_flags: -sV -p 80,443,593,808,3000,4443,5801,5800,7443,7627,8000,8003,8008,8080,8443,8888
+  nmap_flags: -sV -p 80,443,593,808,3000,4443,5801,5800,7443,7627,8000,8003,8006,8008,8080,8443,8888

@@ -19,6 +19,31 @@ class Host:
             if existing_service.port == service.port and existing_service.protocol == service.protocol:
                 existing_service.service_name = service.service_name or existing_service.service_name
                 existing_service.service_version = service.service_version or existing_service.service_version
+                if service.extrainfo:
+                    if not existing_service.extrainfo:
+                        existing_service.extrainfo = service.extrainfo
+                    elif service.extrainfo != existing_service.extrainfo:
+                        # Both have different extrainfo - concatenate
+                        existing_service.extrainfo += f" | {service.extrainfo}"
+                # Merge description (prefer non-empty, or concatenate if both exist and different)
+                if service.description:
+                    if not existing_service.description:
+                        existing_service.description = service.description
+                    elif service.description != existing_service.description:
+                        # Both have different descriptions - concatenate
+                        existing_service.description += f"\n{service.description}"
+                # Merge proofs array (screenshots, tool outputs, scan results)
+                if service.proofs:
+                    for new_proof in service.proofs:
+                        # Check if this proof already exists (by type, content, and timestamp)
+                        proof_exists = any(
+                            existing_proof.get('type') == new_proof.get('type') and
+                            existing_proof.get('content') == new_proof.get('content') and
+                            existing_proof.get('timestamp') == new_proof.get('timestamp')
+                            for existing_proof in existing_service.proofs
+                        )
+                        if not proof_exists:
+                            existing_service.proofs.append(new_proof)
                 return
         self.services.append(service)
     
