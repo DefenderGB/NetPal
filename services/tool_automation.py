@@ -113,13 +113,43 @@ class ToolAutomation:
         """
         return re.findall(r'\{(username|password|domain)\}', command)
     
+    def _inject_interface_flag(self, command: str, interface: str) -> str:
+        """
+        Inject network interface flag into nmap commands.
+        
+        Args:
+            command: Original command string
+            interface: Network interface name (e.g., "tun0", "eth0")
+            
+        Returns:
+            Modified command with interface flag if command uses nmap
+        """
+        # Check if this is an nmap command
+        if not command.strip().startswith('nmap'):
+            return command
+        
+        # Check if -e flag is already present
+        if '-e ' in command or '-e\t' in command:
+            logger.debug(f"Command already has -e flag, skipping injection")
+            return command
+        
+        # Inject -e <interface> right after 'nmap'
+        parts = command.split(None, 1)  # Split on first whitespace
+        if len(parts) == 1:
+            # Just 'nmap' with no args - add at end
+            return f"{parts[0]} -e {interface}"
+        else:
+            # Insert after 'nmap' command
+            return f"{parts[0]} -e {interface} {parts[1]}"
+    
     def run_tool_with_credentials(
         self,
         tool_config: ToolConfig,
         ip: str,
         port: Optional[int] = None,
         timeout: int = 300,
-        output_dir: Optional[str] = None
+        output_dir: Optional[str] = None,
+        interface: Optional[str] = None
     ) -> Tuple[str, str]:
         """
         Execute a tool with credential brute forcing.
@@ -130,6 +160,7 @@ class ToolAutomation:
             port: Optional target port number
             timeout: Command timeout in seconds per credential attempt
             output_dir: Directory to store consolidated results
+            interface: Network interface to use (e.g., "tun0", "eth0")
             
         Returns:
             Tuple of (consolidated_output, error_message)
@@ -147,7 +178,7 @@ class ToolAutomation:
         
         if not credentials:
             logger.warning(f"No credentials enabled for brute force. Running tool without credentials.")
-            return self.run_tool(tool_config, ip, port, timeout)
+            return self.run_tool(tool_config, ip, port, timeout, output_dir, interface)
         
         logger.info(f"Running tool '{tool_name}' with {len(credentials)} credential sets")
         
@@ -178,6 +209,10 @@ class ToolAutomation:
             
             if '{domain}' in command:
                 command = command.replace('{domain}', domain)
+            
+            # Add interface flag for nmap commands if interface is specified
+            if interface and interface.strip():
+                command = self._inject_interface_flag(command, interface.strip())
             
             logger.info(f"Attempt {idx}/{len(credentials)}: Running '{tool_name}' with username='{username or '(empty)'}'")
             
@@ -279,7 +314,8 @@ class ToolAutomation:
         ip: str,
         port: Optional[int] = None,
         timeout: int = 300,
-        output_dir: Optional[str] = None
+        output_dir: Optional[str] = None,
+        interface: Optional[str] = None
     ) -> Tuple[str, str]:
         """
         Execute a tool with the given configuration.
@@ -289,6 +325,8 @@ class ToolAutomation:
             ip: Target IP address
             port: Optional target port number
             timeout: Command timeout in seconds (default: 300)
+            output_dir: Directory to store consolidated results
+            interface: Network interface to use (e.g., "tun0", "eth0")
             
         Returns:
             Tuple of (output, error_message)
@@ -303,6 +341,7 @@ class ToolAutomation:
             ...     print(output)
         """
         tool_name = tool_config.get('name', 'Unknown')
+        
         try:
             command = tool_config.get('command', '')
             if not command:
@@ -313,12 +352,16 @@ class ToolAutomation:
             # Check if command has credential placeholders
             if self.has_credential_placeholders(command):
                 logger.info(f"Tool '{tool_name}' has credential placeholders. Running with credential iteration.")
-                return self.run_tool_with_credentials(tool_config, ip, port, timeout, output_dir)
+                return self.run_tool_with_credentials(tool_config, ip, port, timeout, output_dir, interface)
             
             # Replace standard placeholders
             command = command.replace('{ip}', ip)
             if port:
                 command = command.replace('{port}', str(port))
+            
+            # Add interface flag for nmap commands if interface is specified
+            if interface and interface.strip():
+                command = self._inject_interface_flag(command, interface.strip())
             
             logger.info(f"Executing tool '{tool_name}': {command}")
             

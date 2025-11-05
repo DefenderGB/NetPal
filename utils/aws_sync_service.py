@@ -80,6 +80,9 @@ class AwsSyncService:
     STATES_FILE = Path(STATES_FILE)
     SCAN_RESULTS_DIR = Path(SCAN_RESULTS_DIR)
     
+    # Files to exclude from S3 sync (system and repository metadata files)
+    EXCLUDED_FILES = {'.DS_Store', '.gitkeep'}
+    
     def __init__(self, enabled: bool = True):
         """
         Initialize the AWS sync service.
@@ -323,7 +326,16 @@ class AwsSyncService:
                     local_data = json.load(f)
                 
                 # Check if project should be synced to cloud (default True for backward compatibility)
-                sync_to_cloud = local_data.get('sync_to_cloud', True)
+                # Check both long form 'sync_to_cloud' and short form 'sync' (from to_dict optimization)
+                sync_to_cloud = local_data.get('sync_to_cloud')
+                if sync_to_cloud is None:
+                    # Check short form 'sync' (0 = False, 1 = True)
+                    sync_value = local_data.get('sync')
+                    if sync_value is not None:
+                        sync_to_cloud = bool(sync_value)
+                    else:
+                        sync_to_cloud = True  # Default for backward compatibility
+                
                 if not sync_to_cloud:
                     return {'action': 'skipped', 'message': 'Project marked as local-only (sync_to_cloud=False)'}
                 
@@ -425,7 +437,16 @@ class AwsSyncService:
                         project_data = json.load(f)
                     
                     # Check if project should be synced to cloud (default True for backward compatibility)
-                    sync_to_cloud = project_data.get('sync_to_cloud', True)
+                    # Check both long form 'sync_to_cloud' and short form 'sync' (from to_dict optimization)
+                    sync_to_cloud = project_data.get('sync_to_cloud')
+                    if sync_to_cloud is None:
+                        # Check short form 'sync' (0 = False, 1 = True)
+                        sync_value = project_data.get('sync')
+                        if sync_value is not None:
+                            sync_to_cloud = bool(sync_value)
+                        else:
+                            sync_to_cloud = True  # Default for backward compatibility
+                    
                     if not sync_to_cloud:
                         # Skip projects that are marked as local-only
                         continue
@@ -658,7 +679,16 @@ class AwsSyncService:
                         project_data = json.load(f)
                     
                     # Check sync_to_cloud flag (default True for backward compatibility)
-                    sync_to_cloud = project_data.get('sync_to_cloud', True)
+                    # Check both long form 'sync_to_cloud' and short form 'sync' (from to_dict optimization)
+                    sync_to_cloud = project_data.get('sync_to_cloud')
+                    if sync_to_cloud is None:
+                        # Check short form 'sync' (0 = False, 1 = True)
+                        sync_value = project_data.get('sync')
+                        if sync_value is not None:
+                            sync_to_cloud = bool(sync_value)
+                        else:
+                            sync_to_cloud = True  # Default for backward compatibility
+                    
                     if not sync_to_cloud:
                         # Get normalized project name
                         project_name = project_data.get('name', project_file.stem)
@@ -708,6 +738,10 @@ class AwsSyncService:
             for root, dirs, files in os.walk(self.SCAN_RESULTS_DIR):
                 for file in files:
                     try:
+                        # Skip excluded files (.DS_Store, .gitkeep, etc.)
+                        if file in self.EXCLUDED_FILES:
+                            continue
+                        
                         local_path = Path(root) / file
                         # Get relative path from scan_results directory
                         relative_path = local_path.relative_to(self.SCAN_RESULTS_DIR)
@@ -800,6 +834,11 @@ class AwsSyncService:
                 for obj in page.get('Contents', []):
                     try:
                         s3_key = obj['Key']
+                        
+                        # Skip excluded files (.DS_Store, .gitkeep, etc.)
+                        filename = s3_key.split('/')[-1]  # Get filename from path
+                        if filename in self.EXCLUDED_FILES:
+                            continue
                         
                         # Extract project name from S3 key (first part of path)
                         key_parts = s3_key.split('/')

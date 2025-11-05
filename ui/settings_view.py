@@ -2,7 +2,8 @@ import streamlit as st
 from ui.components.ai_config_components import (
     render_aws_config_fields,
     render_bedrock_config_fields,
-    render_openai_config_fields
+    render_openai_config_fields,
+    render_model_management_section
 )
 from utils.constants import AWS_REGIONS
 
@@ -209,119 +210,17 @@ def render_aws_bedrock_configuration(settings):
                 settings['bedrock']['temperature'] = bedrock_config['temperature']
                 
                 if save_ai_settings(settings):
-                    st.success("✅ Bedrock configuration saved successfully!")
-                    st.info("ℹ️ Changes will take effect in the next chat session")
+                    st.toast("✅ Bedrock configuration saved successfully!")
                     st.rerun()
         
-        # Model Management Section
-        st.markdown("---")
-        st.subheader("Available Models")
-        st.markdown("Manage the list of available Bedrock models")
-        
-        with st.expander("➕ Add New Model"):
-            with st.form("add_model_form"):
-                new_model_id = st.text_input(
-                    "Model ID",
-                    placeholder="e.g., anthropic.claude-3-sonnet-20240229-v1:0",
-                    help="Full Bedrock model identifier"
-                )
-                
-                new_model_name = st.text_input(
-                    "Display Name",
-                    placeholder="e.g., Claude 3 Sonnet",
-                    help="Human-readable name for the model"
-                )
-                
-                add_model_btn = st.form_submit_button("Add Model")
-                
-                if add_model_btn:
-                    if new_model_id and new_model_name:
-                        available_models = settings['bedrock'].get('available_models', [])
-                        # Check for duplicate
-                        if any(m['id'] == new_model_id for m in available_models):
-                            st.error(f"❌ Model with ID '{new_model_id}' already exists")
-                        else:
-                            available_models.append({
-                                'id': new_model_id,
-                                'name': new_model_name
-                            })
-                            settings['bedrock']['available_models'] = available_models
-                            
-                            if save_ai_settings(settings):
-                                st.success(f"✅ Added model: {new_model_name}")
-                                st.rerun()
-                    else:
-                        st.error("❌ Please provide both Model ID and Display Name")
-        
-        # Display models in dataframe table
-        available_models = settings['bedrock'].get('available_models', [])
-        current_model_id = settings['bedrock'].get('model_id', '')
-        
-        if available_models:
-            import pandas as pd
-            
-            # Build table data with primary indicator
-            models_data = []
-            for idx, model in enumerate(available_models):
-                is_primary = '✓' if model['id'] == current_model_id else ''
-                models_data.append({
-                    'Primary': is_primary,
-                    'Name': model['name'],
-                    'Model ID': model['id']
-                })
-            
-            df_models = pd.DataFrame(models_data)
-            
-            # Display interactive table with row selection
-            event = st.dataframe(
-                df_models,
-                width='stretch',
-                hide_index=True,
-                on_select="rerun",
-                selection_mode="single-row"
-            )
-            
-            # Action buttons for selected row
-            selected_rows = event.selection.rows if event.selection and hasattr(event.selection, 'rows') else []
-            
-            if selected_rows:
-                selected_idx = selected_rows[0]
-                selected_model = available_models[selected_idx]
-                
-                col1, col2, col3 = st.columns([1, 1, 3])
-                
-                with col1:
-                    if st.button("⭐ Set as Primary", key="set_primary_bedrock"):
-                        settings['bedrock']['model_id'] = selected_model['id']
-                        if save_ai_settings(settings):
-                            st.success(f"✅ Set {selected_model['name']} as primary model")
-                            st.rerun()
-                
-                with col2:
-                    if st.button("🗑️ Remove", key="remove_bedrock", type="secondary"):
-                        # Don't allow removing the current model
-                        if selected_model['id'] == current_model_id:
-                            st.error("❌ Cannot remove the currently selected primary model")
-                        else:
-                            available_models.pop(selected_idx)
-                            settings['bedrock']['available_models'] = available_models
-                            
-                            if save_ai_settings(settings):
-                                st.success(f"✅ Removed model: {selected_model['name']}")
-                                st.rerun()
-            else:
-                st.info("💡 Select a row to set as primary or remove")
-        else:
-            st.info("No models available. Add one using the form above.")
-        
-        # Reset to defaults button
-        st.markdown("---")
-        if st.button("🔄 Reset to Default Settings", type="secondary"):
-            from ui.ai_settings_view import load_ai_settings
-            default_settings = load_ai_settings()  # This will create defaults if file doesn't exist
-            if save_ai_settings(default_settings):
-                st.success("✅ Reset to default settings!")
-                st.rerun()
+        # Model Management Section - using shared component
+        render_model_management_section(
+            settings=settings,
+            provider_key='bedrock',
+            model_field='model_id',
+            save_callback=save_ai_settings,
+            provider_display_name='Bedrock'
+        )
 
 
 def render_openai_configuration(settings):
@@ -332,144 +231,139 @@ def render_openai_configuration(settings):
     
     openai_config = settings.get('openai', {})
     
-    # Use shared OpenAI config component with preset selector outside form
-    preset_info = render_openai_config_fields(
-        openai_config,
-        in_form=False,
-        show_preset_selector=True
+    # Provider presets
+    provider_presets = {
+        "OpenAI": "https://api.openai.com/v1",
+        "OpenRouter": "https://openrouter.ai/api/v1",
+        "Llama": "https://api.llama.com/compat/v1",
+        "Gemini": "https://generativelanguage.googleapis.com/v1beta/openai/",
+        "LM Studio / Custom": "http://localhost:1234/v1"
+    }
+    no_token_providers = ["LM Studio / Custom"]
+    
+    current_base_url = openai_config.get('base_url', 'https://api.openai.com/v1')
+    
+    # Determine current preset from URL
+    current_preset = "LM Studio / Custom"
+    for preset_name, preset_url in provider_presets.items():
+        if preset_url and current_base_url == preset_url:
+            current_preset = preset_name
+            break
+    
+    # Preset selector - when changed, update base URL
+    selected_preset = st.selectbox(
+        "Provider Preset",
+        options=list(provider_presets.keys()),
+        index=list(provider_presets.keys()).index(current_preset),
+        help="Select a provider preset - Base URL will auto-update. LM Studio/Custom allows any local or custom endpoint",
+        key="openai_preset_selector"
     )
     
+    # Auto-fill base URL based on preset
+    if selected_preset == "LM Studio / Custom":
+        preset_base_url = current_base_url
+    else:
+        preset_base_url = provider_presets.get(selected_preset, current_base_url)
+    
     st.markdown("---")
     
-    with st.form("openai_config_form"):
-        # Use shared component for form fields, passing preset URL
-        form_config = render_openai_config_fields(
-            openai_config,
-            in_form=True,
-            show_preset_selector=False,
-            preset_base_url=preset_info.get('preset_base_url') if preset_info else None
-        )
-        
-        submitted = st.form_submit_button("💾 Save OpenAI Configuration", type="primary")
-        
-        if submitted:
-            settings['openai'] = form_config
-            
-            if save_ai_settings(settings):
-                st.success("✅ OpenAI configuration saved successfully!")
-                st.info("ℹ️ Changes will take effect in the next chat session")
-                st.rerun()
-            else:
-                st.error("❌ Failed to save OpenAI settings")
+    # Configuration fields (NOT in a form to allow dynamic updates)
+    # Base URL (dynamically updates based on preset)
+    base_url = st.text_input(
+        "Base URL",
+        value=preset_base_url,
+        help="API endpoint base URL - editable for all providers",
+        key=f"openai_base_url_{selected_preset}"  # Key changes with preset to force update
+    )
     
-    # Model Management Section
-    st.markdown("---")
-    st.subheader("Available Models")
-    st.markdown("Manage the list of available OpenAI models")
+    # API Token
+    token_required = selected_preset not in no_token_providers
     
-    with st.expander("➕ Add New Model"):
-        with st.form("add_openai_model_form"):
-            new_model_id = st.text_input(
-                "Model ID",
-                placeholder="e.g., gpt-4-turbo-preview",
-                help="OpenAI model identifier"
-            )
-            
-            new_model_name = st.text_input(
-                "Display Name",
-                placeholder="e.g., GPT-4 Turbo",
-                help="Human-readable name for the model"
-            )
-            
-            
-            
-            add_model_btn = st.form_submit_button("Add Model")
-            
-            if add_model_btn:
-                if new_model_id and new_model_name:
-                    openai_config = settings.get('openai', {})
-                    available_models = openai_config.get('available_models', [])
-                    
-                    # Check for duplicate
-                    if any(m['id'] == new_model_id for m in available_models):
-                        st.error(f"❌ Model with ID '{new_model_id}' already exists")
-                    else:
-                        available_models.append({
-                            'id': new_model_id,
-                            'name': new_model_name
-                        })
-                        openai_config['available_models'] = available_models
-                        settings['openai'] = openai_config
-                        
-                        if save_ai_settings(settings):
-                            st.success(f"✅ Added model: {new_model_name}")
-                            st.rerun()
-                else:
-                    st.error("❌ Please provide both Model ID and Display Name")
+    api_token = st.text_input(
+        "API Token" + ("" if token_required else " (Optional for local server)"),
+        value=openai_config.get('api_token', ''),
+        help="Your API key for the selected provider (not required for local servers like LM Studio)",
+        key="openai_api_token"
+    )
     
-    # Display models in dataframe table
-    openai_config = settings.get('openai', {})
+    # Show warning/info about token
+    if token_required and not api_token:
+        st.warning("⚠️ API token is required for the selected provider")
+    elif not token_required:
+        st.info("ℹ️ Local server mode: API token is optional")
+    
+    # Model selection
     available_models = openai_config.get('available_models', [])
-    current_model = openai_config.get('model', '')
+    current_model = openai_config.get('model', 'gpt-3.5-turbo')
     
     if available_models:
-        import pandas as pd
+        model_options = {m['id']: m['name'] for m in available_models}
+        model_ids = list(model_options.keys())
+        current_index = model_ids.index(current_model) if current_model in model_ids else 0
         
-        # Build table data with primary indicator
-        models_data = []
-        for idx, model in enumerate(available_models):
-            is_primary = '✓' if model['id'] == current_model else ''
-            models_data.append({
-                'Primary': is_primary,
-                'Name': model['name'],
-                'Model ID': model['id']
-            })
-        
-        df_models = pd.DataFrame(models_data)
-        
-        # Display interactive table with row selection
-        event = st.dataframe(
-            df_models,
-            width='stretch',
-            hide_index=True,
-            on_select="rerun",
-            selection_mode="single-row"
+        model = st.selectbox(
+            "Model",
+            options=model_ids,
+            index=current_index,
+            format_func=lambda x: model_options[x],
+            help="Select the OpenAI model to use",
+            key="openai_model"
         )
-        
-        # Action buttons for selected row
-        selected_rows = event.selection.rows if event.selection and hasattr(event.selection, 'rows') else []
-        
-        if selected_rows:
-            selected_idx = selected_rows[0]
-            selected_model = available_models[selected_idx]
-            
-            col1, col2, col3 = st.columns([1, 1, 3])
-            
-            with col1:
-                if st.button("⭐ Set as Primary", key="set_primary_openai"):
-                    openai_config['model'] = selected_model['id']
-                    settings['openai'] = openai_config
-                    if save_ai_settings(settings):
-                        st.success(f"✅ Set {selected_model['name']} as primary model")
-                        st.rerun()
-            
-            with col2:
-                if st.button("🗑️ Remove", key="remove_openai", type="secondary"):
-                    # Don't allow removing the current model
-                    if selected_model['id'] == current_model:
-                        st.error("❌ Cannot remove the currently selected primary model")
-                    else:
-                        available_models.pop(selected_idx)
-                        openai_config['available_models'] = available_models
-                        settings['openai'] = openai_config
-                        
-                        if save_ai_settings(settings):
-                            st.success(f"✅ Removed model: {selected_model['name']}")
-                            st.rerun()
-        else:
-            st.info("💡 Select a row to set as primary or remove")
     else:
-        st.info("No models available. Add one using the form above.")
+        model = current_model
+    
+    # Model parameters
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        max_tokens = st.number_input(
+            "Max Tokens",
+            min_value=1,
+            max_value=100000,
+            value=openai_config.get('max_tokens', 4096),
+            step=256,
+            help="Maximum tokens in response",
+            key="openai_max_tokens"
+        )
+    
+    with col2:
+        temperature = st.slider(
+            "Temperature",
+            min_value=0.0,
+            max_value=2.0,
+            value=float(openai_config.get('temperature', 0.7)),
+            step=0.1,
+            help="Controls randomness (0=focused, 2=very creative)",
+            key="openai_temperature"
+        )
+    
+    # Save button outside form
+    if st.button("💾 Save OpenAI Configuration", type="primary", key="save_openai_config"):
+        # Build updated config
+        settings['openai'] = {
+            'base_url': base_url,
+            'api_token': api_token,
+            'model': model,
+            'max_tokens': max_tokens,
+            'temperature': temperature,
+            'available_models': available_models
+        }
+        
+        if save_ai_settings(settings):
+            st.success("✅ OpenAI configuration saved successfully!")
+            st.info("ℹ️ Changes will take effect in the next chat session")
+            st.rerun()
+        else:
+            st.error("❌ Failed to save OpenAI settings")
+    
+    # Model Management Section - using shared component
+    render_model_management_section(
+        settings=settings,
+        provider_key='openai',
+        model_field='model',
+        save_callback=save_ai_settings,
+        provider_display_name='OpenAI'
+    )
 
 
 def render_scan_settings_content():

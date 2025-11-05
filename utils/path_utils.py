@@ -80,10 +80,11 @@ def find_screenshot_path(
     port: int
 ) -> Optional[str]:
     """
-    Find screenshot file for a given host/port, checking both new and old locations.
+    Find screenshot file for a given host/port, searching all network directories.
     
-    This function handles the migration from old screenshot storage (output/)
-    to new organized storage (scan_results/).
+    After merging duplicate hosts, screenshots may remain in the original network
+    directory. This function searches the current network first, then all other
+    network directories within the project.
     
     Args:
         project_name: Project name
@@ -97,7 +98,7 @@ def find_screenshot_path(
     project_safe = sanitize_project_name(project_name)
     network_safe = sanitize_network_range(network_range)
     
-    # Screenshots are stored in scan_results/<project>/<network>/screenshot/<ip>_<port>/
+    # First, check the current network directory
     screenshot_dir = Path("scan_results") / project_safe / network_safe / \
                     "screenshot" / f"{host_ip}_{port}"
     
@@ -105,6 +106,20 @@ def find_screenshot_path(
         png_files = list(screenshot_dir.glob("*.png"))
         if png_files:
             return str(png_files[0])  # Return first PNG found
+    
+    # If not found, search all other network directories in the project
+    project_base = Path("scan_results") / project_safe
+    
+    if project_base.exists():
+        for network_dir in project_base.iterdir():
+            if not network_dir.is_dir() or network_dir.name == network_safe:
+                continue  # Skip non-directories and the current network
+            
+            alt_screenshot_dir = network_dir / "screenshot" / f"{host_ip}_{port}"
+            if alt_screenshot_dir.exists():
+                png_files = list(alt_screenshot_dir.glob("*.png"))
+                if png_files:
+                    return str(png_files[0])  # Return first PNG found
     
     return None
 

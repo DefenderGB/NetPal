@@ -279,6 +279,9 @@ page_structure = {
     "Hosts": [
         "Host View"
     ],
+    "Services": [
+        "Service View"
+    ],
     "Findings": [
         "Findings Dashboard"
     ],
@@ -366,6 +369,9 @@ elif page == "Manage Assets":
 elif page == "Host View":
     from ui.host_view import render_host_view
     render_host_view()
+elif page == "Service View":
+    from ui.service_view import render_service_view
+    render_service_view()
 elif page == "Findings Dashboard":
     from ui.findings_view import render_findings_view
     render_findings_view()

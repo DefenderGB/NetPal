@@ -197,17 +197,41 @@ class NmapScanner:
         return filepath
     
     def _get_scan_filepath(self, project_name: str, scan_type: str, network_range: str, is_active_hosts: bool = False) -> str:
-        """Generate organized filepath for scan results using epoch timestamp."""
+        """
+        Generate organized filepath for scan results using epoch timestamp.
+        
+        Creates directory structure: scan_results/<project>/<network_or_list>/
+        Falls back to project directory if network_range not provided (backwards compatibility).
+        
+        Args:
+            project_name: Name of the project
+            scan_type: Type of scan being performed
+            network_range: Network range or list name for organizing results
+            is_active_hosts: Whether scanning active hosts (not currently used)
+            
+        Returns:
+            Full path to the output XML file
+        """
         # Create project-specific directory
         project_dir = os.path.join(self.base_scan_dir, sanitize_project_name(project_name))
-        if not os.path.exists(project_dir):
-            os.makedirs(project_dir, exist_ok=True)
+        
+        # If network_range is provided, create network subdirectory
+        if network_range:
+            network_dir = os.path.join(project_dir, sanitize_network_range(network_range))
+            if not os.path.exists(network_dir):
+                os.makedirs(network_dir, exist_ok=True)
+            output_dir = network_dir
+        else:
+            # Backwards compatibility: use project directory if no network_range
+            if not os.path.exists(project_dir):
+                os.makedirs(project_dir, exist_ok=True)
+            output_dir = project_dir
         
         # Build filename with epoch timestamp for uniqueness
         epoch = int(time.time())
         filename = f"{scan_type}_{epoch}.xml"
         
-        return os.path.join(project_dir, filename)
+        return os.path.join(output_dir, filename)
     
     def check_nmap_installed(self) -> bool:
         """Check if nmap is installed and accessible."""
@@ -235,6 +259,10 @@ class NmapScanner:
             
         Returns:
             List of command arguments
+            
+        Examples:
+            >>> scanner._build_nmap_command('top1000', '192.168.1.0/24', 'out.xml')
+            ['nmap', '--top-ports', '1000', '-sV', '-v', '192.168.1.0/24', '-oX', 'out.xml']
         """
         cmd = [self.nmap_path]
         
@@ -424,7 +452,7 @@ class NmapScanner:
                   output_callback: Callable[[str], None] = None,
                   custom_ports: str = None, use_file: bool = False,
                   interface: str = None, skip_host_discovery: bool = False,
-                  is_active_hosts: bool = False) -> Tuple[List[Host], str, str]:
+                  is_active_hosts: bool = False, network_range: str = None) -> Tuple[List[Host], str, str]:
         """
         Core scan execution logic used by all scan methods.
         
@@ -438,12 +466,15 @@ class NmapScanner:
             interface: Network interface to use
             skip_host_discovery: Whether to skip host discovery (add -Pn flag)
             is_active_hosts: Whether scanning active hosts only
+            network_range: Network range or list name for organizing scan results
             
         Returns:
             Tuple of (hosts, error_message, command_output)
         """
-        # Get output file path
-        output_file = self._get_scan_filepath(project_name, scan_type, target, is_active_hosts)
+        # Get output file path - use network_range if provided, otherwise fall back to target
+        # This provides backwards compatibility for callers that don't pass network_range
+        scan_output_network = network_range if network_range else target
+        output_file = self._get_scan_filepath(project_name, scan_type, scan_output_network, is_active_hosts)
         
         try:
             # Build command
@@ -594,7 +625,8 @@ class NmapScanner:
             output_callback=output_callback,
             interface=interface,
             skip_host_discovery=skip_host_discovery,
-            is_active_hosts=is_active_hosts
+            is_active_hosts=is_active_hosts,
+            network_range=network_range
         )
     
     def scan_ip_list(self, ip_list: List[str] = None, scan_type: str = "ping",
@@ -682,7 +714,8 @@ class NmapScanner:
                             use_file=True,
                             interface=interface,
                             skip_host_discovery=skip_host_discovery,
-                            is_active_hosts=True
+                            is_active_hosts=True,
+                            network_range=network_range
                         )
                         
                         if error:
@@ -745,7 +778,8 @@ class NmapScanner:
                             use_file=True,
                             interface=interface,
                             skip_host_discovery=skip_host_discovery,
-                            is_active_hosts=True
+                            is_active_hosts=True,
+                            network_range=network_range
                         )
                         
                         if error:
@@ -785,7 +819,8 @@ class NmapScanner:
                 use_file=use_file,
                 interface=interface,
                 skip_host_discovery=skip_host_discovery,
-                is_active_hosts=True
+                is_active_hosts=True,
+                network_range=network_range
             )
         
         # Handle IP list - check if splitting is needed
@@ -805,7 +840,8 @@ class NmapScanner:
                 use_file=False,
                 interface=interface,
                 skip_host_discovery=skip_host_discovery,
-                is_active_hosts=True
+                is_active_hosts=True,
+                network_range=network_range
             )
         
         # Large list (>100 IPs) - split and scan sequentially
@@ -844,7 +880,8 @@ class NmapScanner:
                 use_file=True,
                 interface=interface,
                 skip_host_discovery=skip_host_discovery,
-                is_active_hosts=True
+                is_active_hosts=True,
+                network_range=list_name
             )
             
             if error:
@@ -941,7 +978,8 @@ class NmapScanner:
                             use_file=True,
                             interface=interface,
                             skip_host_discovery=skip_host_discovery,
-                            is_active_hosts=True
+                            is_active_hosts=True,
+                            network_range=network_range
                         )
                         
                         if error:
@@ -1005,7 +1043,8 @@ class NmapScanner:
                             use_file=True,
                             interface=interface,
                             skip_host_discovery=skip_host_discovery,
-                            is_active_hosts=True
+                            is_active_hosts=True,
+                            network_range=network_range
                         )
                         
                         if error:
@@ -1040,5 +1079,6 @@ class NmapScanner:
             interface=interface,
             skip_host_discovery=skip_host_discovery,
             is_active_hosts=is_active_hosts,
-            use_file=use_file
+            use_file=use_file,
+            network_range=network_range
         )

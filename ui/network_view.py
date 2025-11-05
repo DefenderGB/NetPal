@@ -539,7 +539,7 @@ def _build_target_options_for_all_networks(networks):
     return target_options, target_map
 
 
-def _create_process_chunk_callback(project, network, scan_type, output_callback):
+def _create_process_chunk_callback(project, network, scan_type, output_callback, interface=None):
     """
     Create callback for processing scan results after each chunk.
     
@@ -548,6 +548,7 @@ def _create_process_chunk_callback(project, network, scan_type, output_callback)
         network: Network being scanned
         scan_type: Type of scan being performed
         output_callback: Callback for output messages
+        interface: Network interface to use for scanning (optional)
         
     Returns:
         Callback function that processes hosts after each chunk
@@ -569,7 +570,7 @@ def _create_process_chunk_callback(project, network, scan_type, output_callback)
         if output_callback:
             output_callback(f"\n🔧 Running automated tools on {len(hosts)} discovered hosts...\n")
         
-        tool_messages = auto_run_tools(project, network, hosts)
+        tool_messages = auto_run_tools(project, network, hosts, interface=interface)
         
         if output_callback:
             for msg in tool_messages:
@@ -609,7 +610,8 @@ def _execute_network_scan(scanner, target_type, target_data, scan_type, custom_p
     # Execute scan based on target type
     if target_type == TARGET_TYPE_SINGLE_HOST:
         return _scan_single_host(scanner, target_data, scan_type, custom_ports,
-                                project_name, output_callback, network_interface, skip_host_discovery, process_chunk_callback)
+                                project_name, output_callback, network_interface, skip_host_discovery,
+                                network.range if network else None, process_chunk_callback)
     elif target_type == TARGET_TYPE_LIST_ENDPOINTS:
         return _scan_list_endpoints(scanner, target_data, scan_type, custom_ports,
                                    project_name, output_callback, network_interface, skip_host_discovery, process_chunk_callback)
@@ -668,7 +670,8 @@ def _scan_chunk_file(scanner, chunk_file_path, scan_type, custom_ports,
 
 
 def _scan_single_host(scanner, target_ip, scan_type, custom_ports, project_name,
-                     output_callback, network_interface, skip_host_discovery, process_chunk_callback=None):
+                     output_callback, network_interface, skip_host_discovery,
+                     network_range=None, process_chunk_callback=None):
     """Scan a single host or endpoint."""
     logger.debug(f"Scanning single host: {target_ip}")
     
@@ -680,6 +683,7 @@ def _scan_single_host(scanner, target_ip, scan_type, custom_ports, project_name,
             is_active_hosts=False,
             interface=network_interface,
             skip_host_discovery=skip_host_discovery,
+            network_range=network_range,
             process_chunk_callback=process_chunk_callback
         )
     else:
@@ -697,6 +701,9 @@ def _scan_single_host(scanner, target_ip, scan_type, custom_ports, project_name,
 def _scan_list_endpoints(scanner, target_network, scan_type, custom_ports,
                         project_name, output_callback, network_interface, skip_host_discovery, process_chunk_callback=None):
     """Scan all endpoints in a list (file-based or array-based)."""
+    # Always use network.range for organizing scan results
+    network_range = target_network.range
+    
     if target_network.host_list_path:
         # Use file-based scanning with -iL flag
         logger.debug(f"Scanning endpoints from file: {target_network.host_list_path}")
@@ -711,7 +718,7 @@ def _scan_list_endpoints(scanner, target_network, scan_type, custom_ports,
                 interface=network_interface,
                 skip_host_discovery=skip_host_discovery,
                 use_file=True,
-                network_range=target_network.range,
+                network_range=network_range,
                 process_chunk_callback=process_chunk_callback
             )
         else:
@@ -721,7 +728,7 @@ def _scan_list_endpoints(scanner, target_network, scan_type, custom_ports,
                 scan_type=scan_type,
                 output_callback=output_callback,
                 project_name=project_name,
-                network_range=target_network.range,
+                network_range=network_range,
                 host_list_file=target_network.host_list_path,
                 interface=network_interface,
                 skip_host_discovery=skip_host_discovery,
@@ -740,6 +747,7 @@ def _scan_list_endpoints(scanner, target_network, scan_type, custom_ports,
                 is_active_hosts=True,
                 interface=network_interface,
                 skip_host_discovery=skip_host_discovery,
+                network_range=network_range,
                 process_chunk_callback=process_chunk_callback
             )
         else:
@@ -748,7 +756,7 @@ def _scan_list_endpoints(scanner, target_network, scan_type, custom_ports,
                 scan_type=scan_type,
                 output_callback=output_callback,
                 project_name=project_name,
-                network_range=target_network.range,
+                network_range=network_range,
                 interface=network_interface,
                 skip_host_discovery=skip_host_discovery,
                 process_chunk_callback=process_chunk_callback
@@ -758,9 +766,11 @@ def _scan_list_endpoints(scanner, target_network, scan_type, custom_ports,
 def _scan_active_hosts(scanner, target_data, scan_type, custom_ports,
                       project_name, network, output_callback, network_interface, skip_host_discovery, process_chunk_callback=None):
     """Scan all active hosts using file-based or array-based approach."""
-    discovered_ips_path = get_discovered_ips_path(project_name, network.range)
+    # Always use network.range for organizing scan results
+    network_range = network.range
+    discovered_ips_path = get_discovered_ips_path(project_name, network_range)
     
-    if discovered_ips_file_exists(project_name, network.range):
+    if discovered_ips_file_exists(project_name, network_range):
         # Use file-based scanning with -iL
         logger.debug(f"Scanning active hosts from file: {discovered_ips_path}")
         
@@ -774,7 +784,7 @@ def _scan_active_hosts(scanner, target_data, scan_type, custom_ports,
                 interface=network_interface,
                 skip_host_discovery=skip_host_discovery,
                 use_file=True,
-                network_range=network.range,
+                network_range=network_range,
                 process_chunk_callback=process_chunk_callback
             )
         else:
@@ -784,7 +794,7 @@ def _scan_active_hosts(scanner, target_data, scan_type, custom_ports,
                 scan_type=scan_type,
                 output_callback=output_callback,
                 project_name=project_name,
-                network_range=network.range,
+                network_range=network_range,
                 host_list_file=discovered_ips_path,
                 interface=network_interface,
                 skip_host_discovery=skip_host_discovery,
@@ -803,6 +813,7 @@ def _scan_active_hosts(scanner, target_data, scan_type, custom_ports,
                 is_active_hosts=True,
                 interface=network_interface,
                 skip_host_discovery=skip_host_discovery,
+                network_range=network_range,
                 process_chunk_callback=process_chunk_callback
             )
         else:
@@ -810,7 +821,7 @@ def _scan_active_hosts(scanner, target_data, scan_type, custom_ports,
                 active_ips, scan_type,
                 output_callback=output_callback,
                 project_name=project_name,
-                network_range=network.range,
+                network_range=network_range,
                 interface=network_interface,
                 skip_host_discovery=skip_host_discovery,
                 process_chunk_callback=process_chunk_callback
@@ -830,6 +841,7 @@ def _scan_entire_network(scanner, network_range, scan_type, custom_ports,
             is_active_hosts=False,
             interface=network_interface,
             skip_host_discovery=skip_host_discovery,
+            network_range=network_range,
             process_chunk_callback=process_chunk_callback
         )
     else:
@@ -928,7 +940,9 @@ def _process_scan_results(hosts, error, output_text, output_container, scan_type
         if not skip_auto_tools:
             output_text.append("\n🔧 Running automated tools on discovered services...\n")
             with st.spinner("Running automated tools on discovered services..."):
-                tool_messages = auto_run_tools(project, network, hosts)
+                # Get interface from session state if available (from the scan that just completed)
+                interface = st.session_state.get('last_scan_interface', None)
+                tool_messages = auto_run_tools(project, network, hosts, interface=interface)
                 for msg in tool_messages:
                     output_text.append(msg + "\n")
         
@@ -1620,19 +1634,18 @@ def render_upload_list_dialog(dm: DialogManager):
 @st.dialog("Import Nmap XML", width="large")
 def render_import_xml_dialog(dm: DialogManager):
     """Dialog for importing Nmap XML results"""
-    # Check prerequisites - requires CIDR networks specifically
+    # Check prerequisites - requires any networks (CIDR or list)
     prerequisites_met, error_msg, project = check_dialog_prerequisites(
         check_project=True,
-        check_cidr_networks=True
+        check_networks=True
     )
     
     if not prerequisites_met:
         render_dialog_close_button(dm, 'import_xml')
         return
     
-    # Filter to show only CIDR networks for XML import
-    cidr_networks = [net for net in project.networks if net.asset_type == "cidr"]
-    network_options = [net.range for net in cidr_networks]
+    # Show all networks (both CIDR and list) for XML import
+    network_options = [net.range for net in project.networks]
     selected_network = st.selectbox("Target Network", network_options, key="import_network_dialog")
     
     uploaded_file = st.file_uploader("Upload Nmap XML file", type=['xml'], key="xml_uploader_dialog")
@@ -1661,7 +1674,8 @@ def render_import_xml_dialog(dm: DialogManager):
                                 st.write(f"  - {len(host.services)} services")
                     
                     with st.spinner("Running automated tools on discovered services..."):
-                        auto_run_tools(project, network, hosts)
+                        # No interface available for XML imports
+                        auto_run_tools(project, network, hosts, interface=None)
                     
                     st.info(format_success("Import complete - hosts added to project"))
                 else:
@@ -2029,6 +2043,7 @@ def _render_scan_interface_core(
             st.session_state.scan_active = True
             st.session_state.last_scan_output = None
             st.session_state.last_scan_result = None
+            st.session_state.last_scan_interface = network_interface  # Store interface for auto-run tools
             st.rerun()
     
     with col2:
@@ -2073,7 +2088,8 @@ def _render_scan_interface_core(
                 project=project,
                 network=scan_network,
                 scan_type=scan_type,
-                output_callback=update_output
+                output_callback=update_output,
+                interface=network_interface
             )
             
             # Execute scan
@@ -2204,7 +2220,7 @@ def render_scan_page():
     )
 
 
-def auto_run_tools(project, network, hosts):
+def auto_run_tools(project, network, hosts, interface=None):
     """
     Automatically run tools marked with auto_run: true for discovered services.
     Saves output to files in scan_results directory.
@@ -2213,6 +2229,7 @@ def auto_run_tools(project, network, hosts):
         project: The current project
         network: The network being scanned
         hosts: List of hosts discovered in the scan
+        interface: Network interface to use for scanning (e.g., "tun0", "eth0")
         
     Returns:
         List of status messages about tool executions
@@ -2276,7 +2293,8 @@ def auto_run_tools(project, network, hosts):
                 output, error = tool_automation.run_tool(
                     tool_config,
                     host.ip,
-                    service.port
+                    service.port,
+                    interface=interface
                 )
                 
                 # Get the existing host and service from the network
@@ -2379,7 +2397,8 @@ def render_import_page():
                             st.write(f"  - {len(host.services)} services")
                 
                 with st.spinner("Running automated tools on discovered services..."):
-                    auto_run_tools(project, network, hosts)
+                    # No interface available for XML imports
+                    auto_run_tools(project, network, hosts, interface=None)
                 
                 st.info(format_success("Import complete - hosts added to project"))
             else:

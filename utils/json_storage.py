@@ -145,7 +145,8 @@ class JsonStorage:
                 data = json.load(f)
             
             # Ensure sync_to_cloud field exists (default True for backward compatibility with old projects)
-            if 'sync_to_cloud' not in data:
+            # Check for both long form 'sync_to_cloud' and short form 'sync' (from to_dict optimization)
+            if 'sync_to_cloud' not in data and 'sync' not in data:
                 data['sync_to_cloud'] = True
             
             return Project.from_dict(data)

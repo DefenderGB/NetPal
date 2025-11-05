@@ -87,60 +87,120 @@ def load_screenshot(
     # Build screenshot directory path
     screenshot_dir = Path("scan_results") / project_safe / network_safe / "screenshot" / f"{host_ip}_{port}"
     
-    # Check if screenshot directory exists
-    if not screenshot_dir.exists():
-        return ScreenshotResult(
-            success=False,
-            error=f"Screenshot directory not found: {screenshot_dir}"
-        )
-    
-    # Find PNG files in directory
-    png_files = list(screenshot_dir.glob("*.png"))
-    if not png_files:
-        return ScreenshotResult(
-            success=False,
-            error=f"No PNG files found in {screenshot_dir}"
-        )
-    
-    # Try to load the first PNG file
-    screenshot_path = str(png_files[0])
-    
-    try:
-        image = Image.open(screenshot_path)
-        return ScreenshotResult(
-            success=True,
-            image=image,
-            screenshot_path=screenshot_path
-        )
-    except Exception as e:
-        # Screenshot loading failed - try to load response text as fallback
-        response_file = screenshot_path.replace('/screenshot/', '/response/').replace('.png', '.txt')
-        
-        if os.path.exists(response_file):
+    # Try to find screenshot in current network directory first
+    if screenshot_dir.exists():
+        png_files = list(screenshot_dir.glob("*.png"))
+        if png_files:
+            screenshot_path = str(png_files[0])
+            
+            # Try to load the screenshot
             try:
-                with open(response_file, 'r') as f:
-                    response_content = f.read()
+                image = Image.open(screenshot_path)
+                return ScreenshotResult(
+                    success=True,
+                    image=image,
+                    screenshot_path=screenshot_path
+                )
+            except Exception as e:
+                # Screenshot loading failed - try to load response text as fallback
+                response_file = screenshot_path.replace('/screenshot/', '/response/').replace('.png', '.txt')
                 
-                return ScreenshotResult(
-                    success=False,
-                    response_text=response_content,
-                    error=f"Screenshot failed to load: {str(e)}",
-                    screenshot_path=screenshot_path,
-                    response_path=response_file
-                )
-            except Exception as read_error:
-                return ScreenshotResult(
-                    success=False,
-                    error=f"Screenshot and response both failed: {str(e)}, {str(read_error)}",
-                    screenshot_path=screenshot_path,
-                    response_path=response_file
-                )
-        else:
-            return ScreenshotResult(
-                success=False,
-                error=f"Screenshot failed and no response file found: {str(e)}",
-                screenshot_path=screenshot_path
-            )
+                if os.path.exists(response_file):
+                    try:
+                        with open(response_file, 'r') as f:
+                            response_content = f.read()
+                        
+                        return ScreenshotResult(
+                            success=False,
+                            response_text=response_content,
+                            error=f"Screenshot failed to load: {str(e)}",
+                            screenshot_path=screenshot_path,
+                            response_path=response_file
+                        )
+                    except Exception as read_error:
+                        return ScreenshotResult(
+                            success=False,
+                            error=f"Screenshot and response both failed: {str(e)}, {str(read_error)}",
+                            screenshot_path=screenshot_path,
+                            response_path=response_file
+                        )
+                else:
+                    return ScreenshotResult(
+                        success=False,
+                        error=f"Screenshot failed and no response file found: {str(e)}",
+                        screenshot_path=screenshot_path
+                    )
+    
+    # If not found in current network, search all network directories in the project
+    # This handles the case where hosts were merged from one network to another
+    project_base = Path("scan_results") / project_safe
+    
+    if not project_base.exists():
+        return ScreenshotResult(
+            success=False,
+            error=f"Project directory not found: {project_base}"
+        )
+    
+    # Search all network subdirectories
+    for network_dir in project_base.iterdir():
+        if not network_dir.is_dir():
+            continue
+        
+        # Skip if this is the current network (already checked)
+        if network_dir.name == network_safe:
+            continue
+        
+        # Check for screenshot in this network directory
+        alt_screenshot_dir = network_dir / "screenshot" / f"{host_ip}_{port}"
+        
+        if alt_screenshot_dir.exists():
+            png_files = list(alt_screenshot_dir.glob("*.png"))
+            if png_files:
+                screenshot_path = str(png_files[0])
+                
+                # Try to load the screenshot
+                try:
+                    image = Image.open(screenshot_path)
+                    return ScreenshotResult(
+                        success=True,
+                        image=image,
+                        screenshot_path=screenshot_path
+                    )
+                except Exception as e:
+                    # Screenshot loading failed - try to load response text as fallback
+                    response_file = screenshot_path.replace('/screenshot/', '/response/').replace('.png', '.txt')
+                    
+                    if os.path.exists(response_file):
+                        try:
+                            with open(response_file, 'r') as f:
+                                response_content = f.read()
+                            
+                            return ScreenshotResult(
+                                success=False,
+                                response_text=response_content,
+                                error=f"Screenshot failed to load: {str(e)}",
+                                screenshot_path=screenshot_path,
+                                response_path=response_file
+                            )
+                        except Exception as read_error:
+                            return ScreenshotResult(
+                                success=False,
+                                error=f"Screenshot and response both failed: {str(e)}, {str(read_error)}",
+                                screenshot_path=screenshot_path,
+                                response_path=response_file
+                            )
+                    else:
+                        return ScreenshotResult(
+                            success=False,
+                            error=f"Screenshot failed and no response file found: {str(e)}",
+                            screenshot_path=screenshot_path
+                        )
+    
+    # No screenshot found in any network directory
+    return ScreenshotResult(
+        success=False,
+        error=f"Screenshot not found for {host_ip}:{port} in any network directory under project '{project_name}'"
+    )
 
 
 def get_screenshot_directory(

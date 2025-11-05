@@ -154,7 +154,7 @@ def render_statistics(all_findings, project):
         df_severity = pd.DataFrame(list(severity_counts.items()), columns=['Severity', 'Count'])
         # Use Plotly instead of st.bar_chart for Python 3.14 compatibility
         fig = px.bar(df_severity, x='Severity', y='Count', title=None)
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width='stretch')
     
     with col2:
         st.write("**Top Finding Types**")
@@ -180,7 +180,7 @@ def render_statistics(all_findings, project):
         df_network = pd.DataFrame(list(network_findings.items()), columns=['Network', 'Findings'])
         # Use Plotly instead of st.bar_chart for Python 3.14 compatibility
         fig = px.bar(df_network, x='Network', y='Findings', title=None)
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width='stretch')
     
     st.divider()
     

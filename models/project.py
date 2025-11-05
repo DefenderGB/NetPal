@@ -137,14 +137,7 @@ class Project:
                     
                     # Merge is_interesting flag
                     if getattr(other_host, 'is_interesting', False):
-                        base_host.is_interesting = True
-                    
-                    # Remove the duplicate host from the other network
-                    other_network.hosts.remove(other_host)
-                    # Update the other network's host lookup
-                    if hasattr(other_network, '_host_lookup') and ip in other_network._host_lookup:
-                        del other_network._host_lookup[ip]
-        
+                        base_host.is_interesting = True        
         # Then, run per-network deduplication to catch any within-network duplicates
         for network in self.networks:
             network_merges = network.merge_duplicate_hosts()

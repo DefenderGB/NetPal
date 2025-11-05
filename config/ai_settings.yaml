@@ -84,9 +84,9 @@ bedrock:
   - id: amazon.titan-text-embeddings-v2:0
     name: Amazon Titan Text Embeddings V2
 openai:
-  api_token: ''
   base_url: https://api.openai.com/v1
-  model: gpt-3.5-turbo
+  api_token: ''
+  model: gpt-5-chat-latest
   max_tokens: 4096
   temperature: 0.7
   available_models:

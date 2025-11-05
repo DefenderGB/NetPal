@@ -13,6 +13,7 @@ from utils.path_utils import sanitize_project_name, sanitize_network_range, repl
 from utils.constants import SEVERITY_EMOJIS
 from utils.screenshot_utils import load_screenshot
 from utils.project_sync_utils import check_and_reload_if_stale
+from utils.port_services import get_port_display_name
 
 def image_to_base64(img):
     """
@@ -36,6 +37,9 @@ def get_host_screenshot_thumbnail(project_name: str, network_range: str, host) -
     """
     Get the first available screenshot as base64 data URI for this host to display as thumbnail.
     
+    After merging duplicate hosts, screenshots may be in a different network directory.
+    This function searches all network directories to find screenshots.
+    
     Args:
         project_name: Project name
         network_range: Network range
@@ -48,9 +52,11 @@ def get_host_screenshot_thumbnail(project_name: str, network_range: str, host) -
     
     project_safe = sanitize_project_name(project_name)
     network_safe = sanitize_network_range(network_range)
+    project_base = os.path.join("scan_results", project_safe)
     
     # Check for screenshots for each service port, return first found
     for service in host.services:
+        # First, try the current network directory
         screenshot_dir = os.path.join("scan_results", project_safe, network_safe,
                                       "screenshot", f"{host.ip}_{service.port}")
         
@@ -65,6 +71,26 @@ def get_host_screenshot_thumbnail(project_name: str, network_range: str, host) -
                 except Exception as e:
                     # If image can't be loaded, skip to next
                     continue
+        
+        # If not found in current network, search all network directories
+        if os.path.exists(project_base):
+            for network_dir in os.listdir(project_base):
+                network_path = os.path.join(project_base, network_dir)
+                if not os.path.isdir(network_path) or network_dir == network_safe:
+                    continue
+                
+                alt_screenshot_dir = os.path.join(network_path, "screenshot", f"{host.ip}_{service.port}")
+                if os.path.exists(alt_screenshot_dir):
+                    png_files = [f for f in os.listdir(alt_screenshot_dir) if f.endswith('.png')]
+                    if png_files:
+                        screenshot_path = os.path.join(alt_screenshot_dir, png_files[0])
+                        try:
+                            # Load image and convert to base64
+                            img = Image.open(screenshot_path)
+                            return image_to_base64(img)
+                        except Exception as e:
+                            # If image can't be loaded, skip to next
+                            continue
     
     return None
 
@@ -111,29 +137,59 @@ def render_host_view():
             else:
                 st.info("No duplicate hosts found")
     
-    # Collect all unique ports across all hosts for filtering
-    all_ports = set()
-    for network, host in all_hosts:
-        for service in host.services:
-            all_ports.add(service.port)
+    # Collect all unique ports and networks across all hosts for filtering
+    all_ports_with_services = {}  # port -> set of service names
+    all_networks = set()
     
-    # Host Filters
-    col1, col2 = st.columns(2)
+    for network, host in all_hosts:
+        all_networks.add(network)
+        for service in host.services:
+            if service.port not in all_ports_with_services:
+                all_ports_with_services[service.port] = set()
+            if service.service_name:
+                all_ports_with_services[service.port].add(service.service_name)
+    
+    # Host Filters - now with 3 columns
+    col1, col2, col3 = st.columns(3)
     
     with col1:
+        st.write("**Filter by Network/CIDR**")
+        if all_networks:
+            selected_networks = st.multiselect(
+                "Select Networks",
+                sorted(list(all_networks)),
+                default=sorted(list(all_networks)),
+                key="host_view_selected_networks"
+            )
+        else:
+            selected_networks = []
+            st.info("No networks to filter")
+    
+    with col2:
         st.write("**Filter by Open Ports**")
-        if all_ports:
-            selected_ports = st.multiselect(
+        if all_ports_with_services:
+            # Create display names for ports
+            port_display_map = {}
+            for port in sorted(all_ports_with_services.keys()):
+                # Get the most common service name for this port
+                service_names = all_ports_with_services[port]
+                service_name = list(service_names)[0] if service_names else None
+                display_name = get_port_display_name(port, service_name)
+                port_display_map[display_name] = port
+            
+            selected_port_displays = st.multiselect(
                 "Select Ports",
-                sorted(list(all_ports)),
-                default=sorted(list(all_ports)),
+                sorted(port_display_map.keys(), key=lambda x: port_display_map[x]),
+                default=sorted(port_display_map.keys(), key=lambda x: port_display_map[x]),
                 key="host_view_selected_ports"
             )
+            # Convert display names back to port numbers
+            selected_ports = [port_display_map[display] for display in selected_port_displays]
         else:
             selected_ports = []
             st.info("No ports to filter")
     
-    with col2:
+    with col3:
         st.write("**Filter by Findings**")
         findings_filter = st.radio(
             "Show hosts:",
@@ -144,8 +200,12 @@ def render_host_view():
     # Apply filters to all_hosts
     filtered_hosts = []
     for network, host in all_hosts:
+        # Apply network filter
+        if selected_networks and network not in selected_networks:
+            continue
+        
         # Apply port filter
-        if selected_ports and all_ports:
+        if selected_ports and all_ports_with_services:
             host_ports = {service.port for service in host.services}
             if not any(port in selected_ports for port in host_ports):
                 continue
@@ -229,6 +289,9 @@ def render_host_view():
     if hasattr(event, 'selection') and hasattr(event.selection, 'rows') and event.selection.rows:
         selected_idx = event.selection.rows[0]
         selected_network_range, selected_host = filtered_hosts[selected_idx]
+        # Persist this selection for subsequent reruns
+        st.session_state.current_selected_host_ip = selected_host.ip
+        st.session_state.current_selected_host_network = selected_network_range
     # Check if we're navigating from Network List with a specific host selected
     elif 'selected_host_ip' in st.session_state and 'selected_host_network' in st.session_state:
         target_ip = st.session_state.selected_host_ip
@@ -238,11 +301,24 @@ def render_host_view():
             if host.ip == target_ip and network == target_network:
                 selected_host = host
                 selected_network_range = network
+                # Persist this selection for subsequent reruns
+                st.session_state.current_selected_host_ip = host.ip
+                st.session_state.current_selected_host_network = network
                 break
         
-        # Clear the session state after using it
+        # Clear the navigation flags after using them
         del st.session_state.selected_host_ip
         del st.session_state.selected_host_network
+    # Check for persistent selection from previous renders (e.g., after selecting a service)
+    elif 'current_selected_host_ip' in st.session_state and 'current_selected_host_network' in st.session_state:
+        target_ip = st.session_state.current_selected_host_ip
+        target_network = st.session_state.current_selected_host_network
+        
+        for idx, (network, host) in enumerate(filtered_hosts):
+            if host.ip == target_ip and network == target_network:
+                selected_host = host
+                selected_network_range = network
+                break
     
     # Show detailed view if a host is selected
     if selected_host and selected_network_range:
@@ -309,7 +385,7 @@ def render_host_details(project, network, host):
     # Mark as interesting button
     is_interesting = getattr(host, 'is_interesting', False)
     button_text = "⭐ Unmark as interesting" if is_interesting else "⭐ Mark as interesting"
-    if st.button(button_text, key="toggle_interesting", use_container_width=True):
+    if st.button(button_text, key="toggle_interesting", width='stretch'):
         if check_and_reload_if_stale():
             project = st.session_state.current_project
         host.is_interesting = not is_interesting
@@ -826,16 +902,24 @@ def render_inline_nuclei_scan(project, network, host):
 
 
 def render_host_screenshots(project, network, host):
-    """Display all httpx screenshots for this host"""
+    """
+    Display all httpx screenshots for this host.
+    
+    After merging duplicate hosts, screenshots may be in different network directories.
+    This function searches all network directories to find screenshots.
+    """
     screenshots = []
     
     # Sanitize names for directory paths
     project_name_safe = sanitize_project_name(project.name)
     network_range_safe = sanitize_network_range(network.range)
+    project_base = os.path.join("scan_results", project_name_safe)
     
     # Check for screenshots for each service port
     for service in host.services:
-        # Screenshots are stored in scan_results/<project>/<network>/screenshot/<ip>_<port>/
+        screenshot_found = False
+        
+        # First, try the current network directory
         screenshot_dir = os.path.join("scan_results", project_name_safe, network_range_safe, "screenshot", f"{host.ip}_{service.port}")
         
         if os.path.exists(screenshot_dir):
@@ -848,6 +932,25 @@ def render_host_screenshots(project, network, host):
                     'path': screenshot_path,
                     'service': service.service_name or 'unknown'
                 })
+                screenshot_found = True
+        
+        # If not found in current network, search all network directories
+        if not screenshot_found and os.path.exists(project_base):
+            for network_dir in os.listdir(project_base):
+                network_path = os.path.join(project_base, network_dir)
+                if not os.path.isdir(network_path) or network_dir == network_range_safe:
+                    continue
+                
+                alt_screenshot_dir = os.path.join(network_path, "screenshot", f"{host.ip}_{service.port}")
+                if os.path.exists(alt_screenshot_dir):
+                    png_files = [f for f in os.listdir(alt_screenshot_dir) if f.endswith('.png')]
+                    for png_file in png_files:
+                        screenshot_path = os.path.join(alt_screenshot_dir, png_file)
+                        screenshots.append({
+                            'port': service.port,
+                            'path': screenshot_path,
+                            'service': service.service_name or 'unknown'
+                        })
     
     if screenshots:
         st.subheader("📸 HTTP Screenshots")

@@ -22,7 +22,7 @@ def render_projects():
     dm = DialogManager()
     
     # Quick access button
-    if st.button("➕ Create Project", key="open_create_project", type="secondary", use_container_width=True):
+    if st.button("➕ Create Project", key="open_create_project", type="secondary", width='stretch'):
         dm.open_dialog('create_project', close_others=[d for d in DIALOG_NAMES if d != 'create_project'])
         st.rerun()
     
@@ -544,12 +544,12 @@ def render_credentials_dialog(dm: DialogManager):
                         st.write(f"**Logged on:** {cred.get('discovered_date', 'N/A')}")
                     
                     with row1_col4:
-                        if st.button("✏️ Edit", key=f"edit_cred_{idx}", use_container_width=True):
+                        if st.button("✏️ Edit", key=f"edit_cred_{idx}", width='stretch'):
                             st.session_state.editing_credential_idx = idx
                             # Keep dialog open by setting button clicked flag
                             st.session_state._dialog_button_clicked = True
                             st.rerun()
-                        if st.button("🗑️ Delete", key=f"del_cred_{idx}", use_container_width=True):
+                        if st.button("🗑️ Delete", key=f"del_cred_{idx}", width='stretch'):
                             if cred_storage.delete_credential(idx):
                                 st.session_state.editing_credential_idx = None
                                 # Keep dialog open by setting button clicked flag
