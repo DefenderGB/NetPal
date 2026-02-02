@@ -1,0 +1,2 @@
+# NetPalCLI
+NetPal CLI version
