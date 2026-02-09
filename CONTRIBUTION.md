@@ -9,7 +9,7 @@ For questions, issues, or support, please contact: **defender-gb@protonmail.com*
 ## Development Setup
 
 ### Prerequisites
-- Python 3.8 or higher
+- Python 3.10 or higher
 - Git
 - Required external tools (nmap, httpx, nuclei)
 
@@ -21,7 +21,7 @@ git clone https://github.com/DefenderGB/NetPal.git
 cd NetPal
 
 # Install in development mode
-pip install -e . --break-system-packages
+python3.10 -m pip install -e . --break-system-packages
 ```
 
 ## Project Structure

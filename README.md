@@ -29,7 +29,7 @@ NetPal is a command-line tool for network penetration testing, focusing on autom
 
 ### System Requirements
 - Linux/macOS (requires sudo for network scanning)
-- Python 3.8 or higher
+- Python 3.10 or higher
 - sudo privileges (for raw socket access in nmap)
 
 ### Required Tools
@@ -58,7 +58,7 @@ git clone https://github.com/DefenderGB/NetPal.git
 cd NetPal
 
 # Install the package and dependencies
-pip install -e .
+python3.10 -m pip install -e .
 ```
 
 ### Part 2: Install external tools

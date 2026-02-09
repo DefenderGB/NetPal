@@ -23,8 +23,8 @@ echo "[INFO] Checking Python version..."
 python_version=$(python3 --version 2>&1 | awk '{print $2}')
 echo "Found Python $python_version"
 
-if ! python3 -c "import sys; exit(0 if sys.version_info >= (3, 8) else 1)"; then
-    echo "Error: Python 3.8 or higher required"
+if ! python3 -c "import sys; exit(0 if sys.version_info >= (3, 10) else 1)"; then
+    echo "Error: Python 3.10 or higher required"
     exit 1
 fi
 
@@ -234,7 +234,7 @@ if [ "$NMAP_INSTALLED" = true ] && [ "$HTTPX_INSTALLED" = true ]; then
     
     # Now install Python package
     echo "[INFO] Installing NetPal package with dependencies..."
-    pip install -e . --break-system-packages --ignore-installed
+    python3.10 -m pip install -e . --break-system-packages
     export PATH=$PATH:~/.local/bin
     
     if [ $? -eq 0 ]; then
@@ -258,14 +258,14 @@ if [ "$NMAP_INSTALLED" = true ] && [ "$HTTPX_INSTALLED" = true ]; then
         echo "[INFO] Installing package for sudo/root access..."
         
         # Install with sudo so root Python can access
-        sudo pip install -e . --break-system-packages --ignore-installed
+        sudo python3.10 -m pip install -e . --break-system-packages
         
         if sudo python3 -c "import netpal" 2>/dev/null; then
             echo "✓ Package accessible to sudo/root"
             echo "  You can now run: sudo netpal"
         else
             echo "✗ Package installation for sudo failed"
-            echo "  Try: sudo pip install -e ."
+            echo "  Try: sudo python3.10 -m pip install -e . --break-system-packages"
         fi
         
         # Create symlinks for Go tools (httpx, nuclei)
