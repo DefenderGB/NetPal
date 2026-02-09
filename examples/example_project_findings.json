@@ -1,0 +1,16 @@
+[
+  {
+    "finding_id": "f-550e8400-e29b-41d4-a716-446655440001",
+    "host_id": 1,
+    "name": "Outdated Apache HTTP Server",
+    "severity": "Medium",
+    "description": "The web server is running Apache httpd 2.4.41, which contains known vulnerabilities. Several CVEs affect this version including potential remote code execution and denial of service vulnerabilities.",
+    "port": 80,
+    "cvss": 5.3,
+    "cwe": "CWE-284",
+    "remediation": "- Disable remote administration access or restrict it to specific management IPs only\n- Ensure strong, unique administrative credentials are in use\n- Update router firmware to the latest version to patch known vulnerabilities\n- Consider placing router management on a separate VLAN accessible only to administrators",
+    "proof_file": "/path/to/netpal/scan_results/550e8400-e29b-41d4-a716-446655440000/192_168_1_10/auto_tools/auto_httpx_192-168-1-10_8443_1704067200.txt",
+    "impact": "Unauthorized access to the router admin interface could allow an attacker to reconfigure network settings, intercept traffic, modify DNS settings, or use the router as a pivot point for further attacks.",
+    "utc_ts": 1704067400
+  }
+]

@@ -1,0 +1,36 @@
+{
+  "projects": [
+    {
+      "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+      "name": "Production Network",
+      "updated_utc_ts": 1767600025,
+      "external_id": "JIRA-1234",
+      "cloud_sync": true,
+      "deleted": false
+    },
+    {
+      "id": "b2c3d4e5-f6a7-8901-bcde-f12345678901",
+      "name": "DMZ Assessment",
+      "updated_utc_ts": 1767598500,
+      "external_id": "PT-2024-001",
+      "cloud_sync": true,
+      "deleted": false
+    },
+    {
+      "id": "c3d4e5f6-a7b8-9012-cdef-123456789012",
+      "name": "Hack The Box Machine",
+      "updated_utc_ts": 1767595000,
+      "external_id": "",
+      "cloud_sync": false,
+      "deleted": false
+    },
+    {
+      "id": "d4e5f6a7-b8c9-0123-def1-234567890123",
+      "name": "Legacy Infrastructure",
+      "updated_utc_ts": 1767590000,
+      "external_id": "",
+      "cloud_sync": true,
+      "deleted": true
+    }
+  ]
+}

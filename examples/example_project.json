@@ -1,0 +1,137 @@
+{
+  "id": "550e8400-e29b-41d4-a716-446655440000",
+  "name": "Example Pentest",
+  "external_id": "",
+  "assets": [
+    {
+      "asset_id": 0,
+      "type": "network",
+      "associated_host": [
+        0,
+        1
+      ],
+      "name": "Internal Network",
+      "network": "192.168.1.0/24"
+    },
+    {
+      "asset_id": 1,
+      "type": "list",
+      "associated_host": [
+        1
+      ],
+      "name": "Critical Servers",
+      "file": "/path/to/NetPal/scan_results/550e8400-e29b-41d4-a716-446655440000/critical_servers/critical_servers_list.txt"
+    }
+  ],
+  "hosts": [
+    {
+      "host_id": 0,
+      "ip": "192.168.1.1",
+      "hostname": "gateway.local",
+      "os": "Linux 5.4",
+      "assets": [
+        0
+      ],
+      "services": [
+        {
+          "port": 22,
+          "service_name": "ssh",
+          "service_version": "OpenSSH 8.2p1 Ubuntu 4ubuntu0.5",
+          "protocol": "tcp",
+          "extrainfo": "Ubuntu Linux; protocol 2.0",
+          "proof": []
+        },
+        {
+          "port": 80,
+          "service_name": "http",
+          "service_version": "nginx 1.18.0",
+          "protocol": "tcp",
+          "extrainfo": "Ubuntu",
+          "proof": [
+            {
+              "type": "auto_httpx",
+              "utc_ts": 1704067200,
+              "result_file": "/path/to/NetPal/scan_results/550e8400-e29b-41d4-a716-446655440000/192_168_1_1/auto_tools/auto_httpx_192-168-1-1_80_1704067200.txt"
+            }
+          ]
+        }
+      ],
+      "findings": []
+    },
+    {
+      "host_id": 1,
+      "ip": "192.168.1.10",
+      "hostname": "webserver.local",
+      "os": "Linux 5.15",
+      "assets": [
+        0,
+        1
+      ],
+      "services": [
+        {
+          "port": 22,
+          "service_name": "ssh",
+          "service_version": "OpenSSH 8.9p1 Ubuntu 3ubuntu0.1",
+          "protocol": "tcp",
+          "extrainfo": "Ubuntu Linux; protocol 2.0",
+          "proof": [
+            {
+              "type": "nmap_ssh_algorithms_check",
+              "utc_ts": 1704067250,
+              "result_file": "/path/to/NetPal/scan_results/550e8400-e29b-41d4-a716-446655440000/192_168_1_10/auto_tools/ssh_algorithms_check_192-168-1-10_22_1704067250.txt"
+            }
+          ]
+        },
+        {
+          "port": 80,
+          "service_name": "http",
+          "service_version": "Apache httpd 2.4.52",
+          "protocol": "tcp",
+          "extrainfo": "Ubuntu",
+          "proof": [
+            {
+              "type": "auto_httpx",
+              "utc_ts": 1704067260,
+              "result_file": "/path/to/NetPal/scan_results/550e8400-e29b-41d4-a716-446655440000/192_168_1_10/auto_tools/auto_httpx_192-168-1-10_80_1704067260.txt",
+              "screenshot_file": "/path/to/NetPal/scan_results/550e8400-e29b-41d4-a716-446655440000/192_168_1_10/auto_tools/auto_httpx_192-168-1-10_80_1704067260.png"
+            }
+          ]
+        },
+        {
+          "port": 443,
+          "service_name": "ssl/http",
+          "service_version": "Apache httpd 2.4.52",
+          "protocol": "tcp",
+          "extrainfo": "Ubuntu",
+          "proof": [
+            {
+              "type": "auto_httpx",
+              "utc_ts": 1704067270,
+              "result_file": "/path/to/NetPal/scan_results/550e8400-e29b-41d4-a716-446655440000/192_168_1_10/auto_tools/auto_httpx_192-168-1-10_443_1704067270.txt",
+              "screenshot_file": "/path/to/NetPal/scan_results/550e8400-e29b-41d4-a716-446655440000/192_168_1_10/auto_tools/auto_httpx_192-168-1-10_443_1704067270.png"
+            }
+          ]
+        },
+        {
+          "port": 8080,
+          "service_name": "http",
+          "service_version": "Apache Tomcat 9.0.65",
+          "protocol": "tcp",
+          "extrainfo": "",
+          "proof": [
+            {
+              "type": "auto_httpx",
+              "utc_ts": 1704067280,
+              "result_file": "/path/to/NetPal/scan_results/550e8400-e29b-41d4-a716-446655440000/192_168_1_10/auto_tools/auto_httpx_192-168-1-10_8080_1704067280.txt"
+            }
+          ]
+        }
+      ],
+      "findings": [
+        0,
+        1
+      ]
+    }
+  ],
+  "modified_utc_ts": 1704067400
+}
