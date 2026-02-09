@@ -1,5 +1,3 @@
-GO REINSTAL IN UBUNTU
-
 # NetPal - Network Penetration Testing CLI Tool
 
 NetPal is a command-line tool for network penetration testing, focusing on automated reconnaissance, enumeration, exploitability testing, and AI-powered reporting.
