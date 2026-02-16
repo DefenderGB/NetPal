@@ -4,7 +4,8 @@ Handles AI-powered finding analysis and enhancement.
 """
 import os
 from colorama import Fore, Style
-from .finding_viewer import display_findings_summary
+from .display.finding_viewer import display_findings_summary
+from ..models.finding import Severity
 
 
 def run_ai_analysis(ai_analyzer, project, config, progress_callback=None):
@@ -61,8 +62,11 @@ def run_ai_enhancement(ai_analyzer, project):
     """
     Enhance existing findings using detailed AI prompts.
     
+    Uses FindingEnhancer.enhance_finding() which performs a single optimised
+    AI call per finding (instead of 5 separate calls), reducing cost by 80%.
+    
     Args:
-        ai_analyzer: AIAnalyzer instance
+        ai_analyzer: AIAnalyzer instance (must have .enhancer attribute)
         project: Project object
         
     Returns:
@@ -72,57 +76,49 @@ def run_ai_enhancement(ai_analyzer, project):
         print(f"{Fore.YELLOW}[INFO] No findings to enhance{Style.RESET_ALL}")
         return False
     
-    print(f"{Fore.GREEN}[INFO] Enhancing {len(project.findings)} finding(s) with detailed AI analysis...{Style.RESET_ALL}")
-    print(f"{Fore.YELLOW}[INFO] This will use the large custom prompts for description, impact, and remediation{Style.RESET_ALL}\n")
+    if not ai_analyzer.enhancer:
+        print(f"{Fore.RED}[ERROR] AI enhancer not available — check AI configuration{Style.RESET_ALL}")
+        return False
     
-    # Enhance each finding
+    print(f"{Fore.GREEN}[INFO] Enhancing {len(project.findings)} finding(s) with detailed AI analysis...{Style.RESET_ALL}")
+    print(f"{Fore.YELLOW}[INFO] Using optimised single-call enhancement (1 AI call per finding){Style.RESET_ALL}\n")
+    
+    # Enhance each finding using FindingEnhancer
     for idx, finding in enumerate(project.findings, 1):
         print(f"{Fore.CYAN}[{idx}/{len(project.findings)}] Enhancing: {finding.name}{Style.RESET_ALL}")
         
-        # Build finding context
-        finding_context = f"""Finding Name: {finding.name}
-Severity: {finding.severity}
-CVSS: {finding.cvss or 'N/A'}
-Host: {project.get_host(finding.host_id).ip if finding.host_id else 'Unknown'}
-Port: {finding.port or 'N/A'}
-Description: {finding.description[:200] if finding.description else 'N/A'}..."""
+        # Build finding dict for the enhancer
+        host = project.get_host(finding.host_id) if finding.host_id else None
+        finding_dict = {
+            'name': finding.name or '',
+            'severity': finding.severity or 'Info',
+            'cvss': finding.cvss,
+            'host_ip': host.ip if host else 'Unknown',
+            'port': finding.port,
+            'description': finding.description or '',
+            'impact': finding.impact or '',
+            'remediation': finding.remediation or '',
+            'cwe': finding.cwe or '',
+        }
         
-        # Enhance name
-        if finding.name:
-            enhanced_name = ai_analyzer._refine_finding_field('name', finding.name, finding_context)
-            finding.name = enhanced_name
-            print(f"  {Fore.GREEN}✓ Enhanced name{Style.RESET_ALL}")
-        
-        # Enhance description
-        if finding.description:
-            enhanced_desc = ai_analyzer._refine_finding_field('description', finding.description, finding_context)
-            finding.description = enhanced_desc
-            print(f"  {Fore.GREEN}✓ Enhanced description{Style.RESET_ALL}")
-        
-        # Enhance impact
-        if finding.impact:
-            enhanced_impact = ai_analyzer._refine_finding_field('impact', finding.impact, finding_context)
-            finding.impact = enhanced_impact
-            print(f"  {Fore.GREEN}✓ Enhanced impact{Style.RESET_ALL}")
-        
-        # Enhance remediation
-        if finding.remediation:
-            enhanced_remediation = ai_analyzer._refine_finding_field('remediation', finding.remediation, finding_context)
-            finding.remediation = enhanced_remediation
-            print(f"  {Fore.GREEN}✓ Enhanced remediation{Style.RESET_ALL}")
-        
-        # Classify CWE if not already set
-        if not finding.cwe:
-            cwe_finding_data = {
-                'name': finding.name,
-                'severity': finding.severity,
-                'description': finding.description,
-                'impact': finding.impact
-            }
-            cwe = ai_analyzer._classify_cwe(cwe_finding_data)
-            if cwe:
-                finding.cwe = cwe
-                print(f"  {Fore.GREEN}✓ Classified CWE: {cwe}{Style.RESET_ALL}")
+        try:
+            enhanced = ai_analyzer.enhancer.enhance_finding(finding_dict)
+            
+            # Apply enhanced fields back to the finding
+            if enhanced.get('name'):
+                finding.name = enhanced['name']
+            if enhanced.get('description'):
+                finding.description = enhanced['description']
+            if enhanced.get('impact'):
+                finding.impact = enhanced['impact']
+            if enhanced.get('remediation'):
+                finding.remediation = enhanced['remediation']
+            if enhanced.get('cwe') and not finding.cwe:
+                finding.cwe = enhanced['cwe']
+            
+            print(f"  {Fore.GREEN}✓ Enhanced all fields{Style.RESET_ALL}")
+        except Exception as e:
+            print(f"  {Fore.RED}✗ Enhancement failed: {e}{Style.RESET_ALL}")
         
         print()
     
@@ -135,7 +131,7 @@ Description: {finding.description[:200] if finding.description else 'N/A'}..."""
         severity_counts[severity] = severity_counts.get(severity, 0) + 1
     
     print(f"\n{Fore.CYAN}Enhanced findings by severity:{Style.RESET_ALL}")
-    for severity in ['Critical', 'High', 'Medium', 'Low', 'Info']:
+    for severity in Severity.ordered():
         if severity in severity_counts:
             print(f"  {severity}: {severity_counts[severity]}")
     
@@ -178,52 +174,43 @@ def default_ai_progress_callback(event_type, data):
             print(f"  {Fore.YELLOW}✓ No findings identified{Style.RESET_ALL}\n")
 
 
-def check_ai_configuration(config):
-    """
-    Check if AI is properly configured.
+def run_ai_reporting_phase(project, config, aws_sync=None):
+    """Run AI-powered finding analysis and reporting."""
+    from ..services.ai.analyzer import AIAnalyzer
+    from .display.display_utils import display_ai_provider_info
+
+    print(f"\n{Fore.CYAN}  ▸ AI Reporting Phase{Style.RESET_ALL}\n")
     
-    Args:
-        config: Configuration dictionary
-        
-    Returns:
-        Tuple of (is_configured, error_message)
-    """
-    ai_type = config.get('ai_type')
+    # Initialize AI analyzer
+    ai_analyzer = AIAnalyzer(config)
     
-    if ai_type == 'aws' and not config.get('ai_aws_profile'):
-        return False, "AWS AI not configured (missing ai_aws_profile in config.json)"
-    elif ai_type == 'anthropic' and not config.get('ai_anthropic_token'):
-        return False, "Anthropic AI not configured (missing ai_anthropic_token in config.json)"
-    elif ai_type == 'openai' and not config.get('ai_openai_token'):
-        return False, "OpenAI not configured (missing ai_openai_token in config.json)"
-    elif ai_type == 'ollama' and not config.get('ai_ollama_model'):
-        return False, "Ollama not configured (missing ai_ollama_model in config.json)"
-    elif ai_type == 'azure' and (not config.get('ai_azure_token') or not config.get('ai_azure_endpoint')):
-        return False, "Azure OpenAI not configured (missing ai_azure_token or ai_azure_endpoint in config.json)"
-    elif ai_type == 'gemini' and not config.get('ai_gemini_token'):
-        return False, "Gemini AI not configured (missing ai_gemini_token in config.json)"
-    elif ai_type not in ['aws', 'anthropic', 'openai', 'ollama', 'azure', 'gemini']:
-        return False, "Invalid ai_type in config.json (must be 'aws', 'anthropic', 'openai', 'ollama', 'azure', or 'gemini')"
+    if not ai_analyzer.is_configured():
+        print(f"{Fore.YELLOW}[INFO] AI analyzer not properly configured{Style.RESET_ALL}")
+        print(f"{Fore.YELLOW}Please check your AI configuration in config.json{Style.RESET_ALL}")
+        return None
     
-    return True, None
+    # Display AI provider info
+    display_ai_provider_info(ai_analyzer)
+    
+    # Run AI analysis
+    ai_findings = run_ai_analysis(ai_analyzer, project, config)
+    
+    return ai_findings
 
 
-def display_ai_provider_info(ai_analyzer):
-    """
-    Display information about the configured AI provider.
+def run_ai_enhancement_phase(project, config):
+    """Enhance existing findings using detailed AI prompts."""
+    from ..services.ai.analyzer import AIAnalyzer
+
+    print(f"\n{Fore.CYAN}  ▸ AI QA Findings — Enhancing Existing Findings{Style.RESET_ALL}\n")
     
-    Args:
-        ai_analyzer: AIAnalyzer instance
-    """
-    if ai_analyzer.ai_type == 'aws':
-        print(f"{Fore.GREEN}[INFO] AI analyzer initialized with AWS Bedrock model: {ai_analyzer.model_id}{Style.RESET_ALL}")
-    elif ai_analyzer.ai_type == 'anthropic':
-        print(f"{Fore.GREEN}[INFO] AI analyzer initialized with Anthropic model: {ai_analyzer.anthropic_model}{Style.RESET_ALL}")
-    elif ai_analyzer.ai_type == 'openai':
-        print(f"{Fore.GREEN}[INFO] AI analyzer initialized with OpenAI model: {ai_analyzer.openai_model}{Style.RESET_ALL}")
-    elif ai_analyzer.ai_type == 'ollama':
-        print(f"{Fore.GREEN}[INFO] AI analyzer initialized with Ollama model: {ai_analyzer.ollama_model}{Style.RESET_ALL}")
-    elif ai_analyzer.ai_type == 'azure':
-        print(f"{Fore.GREEN}[INFO] AI analyzer initialized with Azure OpenAI deployment: {ai_analyzer.azure_deployment}{Style.RESET_ALL}")
-    elif ai_analyzer.ai_type == 'gemini':
-        print(f"{Fore.GREEN}[INFO] AI analyzer initialized with Google Gemini model: {ai_analyzer.gemini_model}{Style.RESET_ALL}")
+    # Initialize AI analyzer
+    ai_analyzer = AIAnalyzer(config)
+    
+    if not ai_analyzer.is_configured():
+        print(f"{Fore.YELLOW}[INFO] AI analyzer not properly configured{Style.RESET_ALL}")
+        print(f"{Fore.YELLOW}Please check your AI configuration in config.json{Style.RESET_ALL}")
+        return False
+    
+    # Run AI enhancement
+    return run_ai_enhancement(ai_analyzer, project)

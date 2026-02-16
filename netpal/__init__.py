@@ -1,9 +1,11 @@
 """
-NetPal - Network Penetration Testing CLI Tool
+NetPal — Automated Network Penetration Testing Tool.
 
-A CLI tool for network reconnaissance, enumeration,
-exploitability testing, and reporting.
+Provides CLI and TUI interfaces for network reconnaissance,
+service enumeration, exploit tool execution, and AI-powered
+security reporting.
 """
 
-__version__ = "1.0.0"
-__author__ = "defendergb"
+__version__ = "1.1.0"
+__author__ = "Gustavo Bobbio-Hertog"
+__email__ = "defender-gb@protonmail.com"

@@ -18,9 +18,7 @@ def run_interactive_setup(config_path=None):
     Returns:
         Exit code (0 for success, 1 for error)
     """
-    print(f"\n{Fore.CYAN}═══════════════════════════════════════════════════════════")
-    print(f"  NETPAL SETUP - Interactive Configuration")
-    print(f"═══════════════════════════════════════════════════════════{Style.RESET_ALL}\n")
+    print(f"\n{Fore.CYAN}  ▸ NetPal Setup — Interactive Configuration{Style.RESET_ALL}\n")
     
     # Load current config
     if config_path is None:
@@ -30,17 +28,13 @@ def run_interactive_setup(config_path=None):
         with open(config_path, 'r') as f:
             config = json.load(f)
     else:
-        config = {}
+        # Start from the full default config so every key is present
+        from .config_loader import DEFAULT_CONFIG
+        config = dict(DEFAULT_CONFIG)
     
     print(f"{Fore.YELLOW}Press Enter to keep current value, or type new value{Style.RESET_ALL}\n")
     
-    # 1. Project name
-    current = config.get('project_name', 'my_pentest')
-    response = input(f"{Fore.CYAN}Set project name [{current}]: {Style.RESET_ALL}").strip()
-    if response:
-        config['project_name'] = response
-    
-    # 2. Network interface - show available interfaces with IPs
+    # Network interface - show available interfaces with IPs
     print(f"\n{Fore.CYAN}Available network interfaces:{Style.RESET_ALL}")
     interfaces_with_ips = get_interfaces_with_ips()
     
@@ -58,13 +52,13 @@ def run_interactive_setup(config_path=None):
     if response:
         config['network_interface'] = response
     
-    # 3. External ID (optional)
+    # External ID (optional)
     current = config.get('external_id', '')
     response = input(f"\n{Fore.CYAN}Set external-id (optional) [{current or 'not set'}]: {Style.RESET_ALL}").strip()
     if response:
         config['external_id'] = response
     
-    # 4. Exclude IPs or Ports
+    # Exclude IPs or Ports
     response = input(f"\n{Fore.CYAN}Do you want to exclude IPs or Ports? (Y/N) [N]: {Style.RESET_ALL}").strip().upper()
     if response == 'Y':
         current_exclude = config.get('exclude', '')
@@ -75,23 +69,23 @@ def run_interactive_setup(config_path=None):
         response = input(f"{Fore.CYAN}Exclude ports [{current_ports}]: {Style.RESET_ALL}").strip()
         config['exclude-ports'] = response
     
-    # 5. User-Agent (optional)
+    # User-Agent (optional)
     current = config.get('user-agent', '')
     response = input(f"\n{Fore.CYAN}Set User-Agent (optional) [{current or 'not set'}]: {Style.RESET_ALL}").strip()
     if response:
         config['user-agent'] = response
     
-    # 6. AWS Sync Configuration
+    # AWS Sync Configuration
     response = input(f"\n{Fore.CYAN}Configure AWS S3 sync (for cloud project storage)? (Y/N) [N]: {Style.RESET_ALL}").strip().upper()
     if response == 'Y':
         config = _setup_aws_sync(config)
     
-    # 7. AI Reporting
+    # AI Reporting
     response = input(f"\n{Fore.CYAN}Setup AI Reporting? (Y/N) [N]: {Style.RESET_ALL}").strip().upper()
     if response == 'Y':
         config = _setup_ai_provider(config)
     
-    # 8. Notifications
+    # Notifications
     response = input(f"\n{Fore.CYAN}Enable webhook notifications? (Y/N) [N]: {Style.RESET_ALL}").strip().upper()
     if response == 'Y':
         config = _setup_notifications(config)
@@ -104,7 +98,7 @@ def run_interactive_setup(config_path=None):
             json.dump(config, f, indent=2)
         
         print(f"\n{Fore.GREEN}[SUCCESS] Configuration saved to {config_path}{Style.RESET_ALL}")
-        print(f"{Fore.GREEN}You can now run: sudo netpal{Style.RESET_ALL}\n")
+        print(f"{Fore.GREEN}Run 'netpal init \"MyProject\"' to create a project{Style.RESET_ALL}\n")
         return 0
     except Exception as e:
         print(f"\n{Fore.RED}[ERROR] Failed to save configuration: {e}{Style.RESET_ALL}")
@@ -262,15 +256,15 @@ def _setup_openai_ai(config):
 
 def _setup_anthropic_ai(config):
     """Setup Anthropic AI configuration."""
-    current = config.get('ai_athropic_token', '')
+    current = config.get('ai_anthropic_token', '')
     response = input(f"{Fore.CYAN}Anthropic API token [{current or 'not set'}]: {Style.RESET_ALL}").strip()
     if response:
-        config['ai_athropic_token'] = response
+        config['ai_anthropic_token'] = response
     
-    current = config.get('ai_athropic_model', 'claude-sonnet-4-5-20250929')
+    current = config.get('ai_anthropic_model', 'claude-sonnet-4-5-20250929')
     response = input(f"{Fore.CYAN}Anthropic model [{current}]: {Style.RESET_ALL}").strip()
     if response:
-        config['ai_athropic_model'] = response
+        config['ai_anthropic_model'] = response
     
     return config
 

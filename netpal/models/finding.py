@@ -3,7 +3,43 @@ Finding model for security vulnerabilities
 """
 import uuid
 import time
-from ..utils.file_utils import make_path_relative_to_scan_results
+from enum import Enum
+from ..utils.persistence.file_utils import make_path_relative_to_scan_results
+
+
+class Severity(str, Enum):
+    """Severity levels for security findings, ordered from most to least severe.
+    
+    Inherits from ``str`` so that ``Severity.CRITICAL == "Critical"`` is ``True``
+    and existing serialization code continues to work unchanged.
+    """
+    CRITICAL = "Critical"
+    HIGH = "High"
+    MEDIUM = "Medium"
+    LOW = "Low"
+    INFO = "Info"
+
+    @classmethod
+    def ordered(cls):
+        """Return severity levels in descending order (most severe first)."""
+        return [cls.CRITICAL, cls.HIGH, cls.MEDIUM, cls.LOW, cls.INFO]
+
+    @classmethod
+    def from_string(cls, value: str) -> 'Severity':
+        """Parse a string into a Severity, defaulting to INFO for unrecognised values.
+
+        Args:
+            value: Case-insensitive severity string
+
+        Returns:
+            Matching ``Severity`` member, or ``Severity.INFO`` as fallback
+        """
+        if not value:
+            return cls.INFO
+        for member in cls:
+            if member.value.lower() == value.strip().lower():
+                return member
+        return cls.INFO
 
 
 class Finding:

@@ -2,9 +2,11 @@
 Target and configuration validation utilities
 """
 import re
+import shutil
+import subprocess
 import psutil
 import ipaddress
-from typing import Tuple
+from colorama import Fore, Style
 from .network_utils import validate_cidr
 
 
@@ -75,42 +77,49 @@ def validate_target(target: str):
     return False, None, "Invalid target format. Expected IP address, hostname, or CIDR network."
 
 
-def validate_network_interface(interface: str) -> bool:
-    """
-    Validate network interface exists on the system.
-    
-    Args:
-        interface: Interface name (e.g., 'eth0')
-        
+def check_sudo():
+    """Validate passwordless sudo for nmap and chown.
+
+    NetPal requires passwordless sudo for two tools:
+      • **nmap** — SYN scans require root privileges.
+      • **chown** — restoring file ownership after sudo nmap.
+
+    Verifies ``sudo -n nmap -V`` succeeds.  If it fails the user is
+    shown the exact sudoers line needed (covering both nmap and chown).
+
     Returns:
-        True if interface exists and is up
+        True if sudo nmap executed successfully.
     """
-    try:
-        stats = psutil.net_if_stats()
-        return interface in stats and stats[interface].isup
-    except Exception:
+    nmap_path = shutil.which('nmap')
+    if not nmap_path:
+        print(f"\n{Fore.RED}[ERROR] nmap not found on PATH.{Style.RESET_ALL}")
+        print(f"{Fore.YELLOW}Please install nmap before using NetPal.{Style.RESET_ALL}\n")
         return False
 
-
-def get_available_interfaces():
-    """
-    Get list of available network interfaces.
-    
-    Returns:
-        List of interface names that are up
-    """
     try:
-        stats = psutil.net_if_stats()
-        addresses = psutil.net_if_addrs()
-        
-        interfaces = []
-        for name, stat in stats.items():
-            if stat.isup and name in addresses:
-                interfaces.append(name)
-        
-        return interfaces
+        result = subprocess.run(
+            ['sudo', '-n', nmap_path, '-V'],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        if result.returncode == 0 and result.stdout.strip().startswith('Nmap version'):
+            return True
     except Exception:
-        return []
+        pass
+
+    # sudo nmap failed — tell the user how to fix it
+    chown_path = shutil.which('chown') or '/usr/bin/chown'
+    print(f"\n{Fore.RED}[ERROR] Unable to run 'sudo nmap' without a password.{Style.RESET_ALL}")
+    print(f"{Fore.YELLOW}NetPal requires passwordless sudo access to:{Style.RESET_ALL}")
+    print(f"  • {Fore.CYAN}nmap{Style.RESET_ALL}   ({nmap_path}) — SYN scans require root")
+    print(f"  • {Fore.CYAN}chown{Style.RESET_ALL}  ({chown_path}) — restore file ownership after scans")
+    print(f"\n{Fore.CYAN}To fix this, run:{Style.RESET_ALL}")
+    print(f"  sudo sh -c \"echo '$USER ALL=(ALL) NOPASSWD: {nmap_path}, {chown_path}' > /etc/sudoers.d/netpal-$USER\"")
+    print(f"  sudo chmod 0440 /etc/sudoers.d/netpal-$USER")
+    print(f"\n{Fore.CYAN}Or re-run the installer:{Style.RESET_ALL}")
+    print(f"  bash install.sh\n")
+    return False
 
 
 def get_interfaces_with_ips():
@@ -139,47 +148,3 @@ def get_interfaces_with_ips():
         return interfaces
     except Exception:
         return []
-
-
-def validate_port_specification(ports: str) -> Tuple[bool, str]:
-    """
-    Validate port specification format.
-    
-    Args:
-        ports: Port string (e.g., "80", "1-100", "22,80,443")
-        
-    Returns:
-        Tuple of (is_valid, error_message)
-    """
-    if not ports or not ports.strip():
-        return False, "Port specification cannot be empty"
-    
-    # Check for single port
-    if ports.isdigit():
-        port_num = int(ports)
-        if 1 <= port_num <= 65535:
-            return True, ""
-        return False, f"Port {port_num} out of range (1-65535)"
-    
-    # Check for port range (e.g., "1-100")
-    if '-' in ports:
-        parts = ports.split('-')
-        if len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit():
-            start, end = int(parts[0]), int(parts[1])
-            if 1 <= start <= end <= 65535:
-                return True, ""
-            return False, f"Invalid port range: {ports}"
-    
-    # Check for comma-separated ports
-    if ',' in ports:
-        port_list = ports.split(',')
-        for p in port_list:
-            p = p.strip()
-            if not p.isdigit():
-                return False, f"Invalid port in list: {p}"
-            port_num = int(p)
-            if not (1 <= port_num <= 65535):
-                return False, f"Port {port_num} out of range (1-65535)"
-        return True, ""
-    
-    return False, f"Invalid port specification: {ports}"

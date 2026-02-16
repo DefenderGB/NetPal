@@ -3,7 +3,7 @@ Project model for penetration testing engagements
 """
 import uuid
 import time
-from typing import List, Optional
+from typing import Optional
 from .asset import Asset
 from .host import Host
 from .finding import Finding
@@ -49,6 +49,21 @@ class Project:
         self.assets.append(asset)
         self.modified_utc_ts = int(time.time())
     
+    def remove_asset(self, asset: Asset):
+        """
+        Remove an asset from the project and clean up host references.
+
+        Args:
+            asset: Asset object to remove
+        """
+        asset_id = asset.asset_id
+        self.assets.remove(asset)
+        # Remove the deleted asset_id from all hosts' asset references
+        for host in self.hosts:
+            if asset_id in host.assets:
+                host.assets.remove(asset_id)
+        self.modified_utc_ts = int(time.time())
+
     def get_asset(self, asset_id: int) -> Optional[Asset]:
         """
         Get asset by ID.
@@ -153,31 +168,6 @@ class Project:
                 return host
         return None
     
-    def delete_asset(self, asset_id: int):
-        """
-        Delete an asset from the project.
-        
-        Args:
-            asset_id: Asset ID to delete
-            
-        Returns:
-            True if asset was deleted, False if not found
-        """
-        asset = self.get_asset(asset_id)
-        if not asset:
-            return False
-        
-        # Remove asset
-        self.assets = [a for a in self.assets if a.asset_id != asset_id]
-        
-        # Remove asset reference from all hosts
-        for host in self.hosts:
-            if asset_id in host.assets:
-                host.assets.remove(asset_id)
-        
-        self.modified_utc_ts = int(time.time())
-        return True
-    
     def add_finding(self, finding: Finding):
         """
         Add a finding to the project.
@@ -253,7 +243,7 @@ class Project:
         Returns:
             True if successful
         """
-        from ..utils.file_utils import get_project_path, save_json, register_project
+        from ..utils.persistence.file_utils import get_project_path, save_json, register_project
         
         # Update modified timestamp
         self.modified_utc_ts = int(time.time())
@@ -280,7 +270,7 @@ class Project:
         Returns:
             Project object or None if not found
         """
-        from ..utils.file_utils import (
+        from ..utils.persistence.file_utils import (
             list_registered_projects,
             get_project_path,
             load_json,
@@ -313,49 +303,3 @@ class Project:
         register_project(project.project_id, project.name, project.modified_utc_ts, project.external_id, project.cloud_sync, aws_sync=None)
         
         return project
-    
-    def migrate_to_new_id(self, aws_sync=None):
-        """
-        Migrate project to a new UUID.
-        Updates project ID and returns old ID for cleanup.
-        
-        Args:
-            aws_sync: Optional AwsSyncService instance for S3 synchronization
-        
-        Returns:
-            Tuple of (old_id, new_id)
-        """
-        import uuid
-        import shutil
-        from pathlib import Path
-        
-        old_id = self.project_id
-        new_id = str(uuid.uuid4())
-        
-        # Update project ID
-        self.project_id = new_id
-        self.modified_utc_ts = int(time.time())
-        
-        # Get paths
-        scan_results_dir = Path.cwd() / "scan_results"
-        
-        # Rename project directory if exists
-        old_dir = scan_results_dir / old_id
-        new_dir = scan_results_dir / new_id
-        
-        if old_dir.exists():
-            shutil.move(str(old_dir), str(new_dir))
-        
-        # Save with new ID (pass aws_sync for proper S3 merge)
-        self.save_to_file(aws_sync)
-        
-        # Clean up old project files
-        old_project_path = scan_results_dir / f"{old_id}.json"
-        if old_project_path.exists():
-            old_project_path.unlink()
-        
-        old_findings_path = scan_results_dir / f"{old_id}_findings.json"
-        if old_findings_path.exists():
-            old_findings_path.unlink()
-        
-        return old_id, new_id

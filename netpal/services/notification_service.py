@@ -1,9 +1,12 @@
 """
 Webhook notification service for scan completion
 """
+import logging
 import requests
 from datetime import datetime
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 
 class NotificationService:
@@ -11,14 +14,16 @@ class NotificationService:
     Sends webhook notifications to Slack or Discord when scans complete.
     """
     
-    def __init__(self, config: dict):
+    def __init__(self, config: dict, verbose: bool = False):
         """
         Initialize notification service.
         
         Args:
             config: Configuration dictionary from config.json
+            verbose: If True, print debug information (also enabled by --verbose flag)
         """
         self.config = config
+        self.verbose = verbose
         self.enabled = config.get('notification_enabled', False)
         self.webhook_type = config.get('notification_type', 'slack')  # 'slack' or 'discord'
         self.webhook_url = config.get('notification_webhook_url', '')
@@ -26,11 +31,17 @@ class NotificationService:
     
     def _resolve_user_email(self, email_config: str) -> str:
         """
-        Resolve user email, prepending username if email starts with @.
+        Resolve user email, prepending username if email starts with @domain.
         Handles sudo properly by checking SUDO_USER environment variable.
         
+        When ``email_config`` begins with ``@`` (e.g. ``@example.com``),
+        the real username is prepended to form ``user@example.com``.
+        The domain suffix is fully configurable via the
+        ``notification_user_email`` config key — no hardcoded domain.
+        
         Args:
-            email_config: Email configuration string
+            email_config: Email configuration string (e.g. ``user@co.com``
+                or ``@co.com`` for auto-resolution)
             
         Returns:
             Resolved email address
@@ -129,7 +140,7 @@ class NotificationService:
             else:
                 # Slack webhook format (default) - needs "input" and "user"
                 if not self.user_email:
-                    print(f"\n[DEBUG] User email not configured for Slack webhook")
+                    logger.warning("Slack notification skipped — notification_user_email not configured")
                     return False
                 
                 payload = {
@@ -137,23 +148,37 @@ class NotificationService:
                     "user": self.user_email
                 }
             
+            logger.debug("Sending %s webhook to %s", self.webhook_type, self.webhook_url)
+            logger.debug("Payload: %s", payload)
+            
             response = requests.post(
                 self.webhook_url,
                 json=payload,
-                headers={'Content-Type': 'application/json'},
                 timeout=10
             )
             
-            if response.status_code == 200:
-                return True
-            else:
-                # Print detailed error for debugging
-                print(f"\n[DEBUG] Webhook response status: {response.status_code}")
-                print(f"[DEBUG] Response body: {response.text}")
+            logger.debug("Webhook response status: %d", response.status_code)
+            logger.debug("Response body: %s", response.text)
+            
+            if not (200 <= response.status_code < 300):
+                logger.warning(
+                    "Webhook returned HTTP %d: %s", response.status_code, response.text
+                )
                 return False
             
+            try:
+                body = response.json()
+                if isinstance(body, dict) and body.get("ok") is False:
+                    error_msg = body.get("error", "unknown error")
+                    logger.warning("Slack webhook returned error: %s", error_msg)
+                    logger.debug("Full Slack response: %s", body)
+                    return False
+            except (ValueError, KeyError):
+                pass
+            
+            return True
+            
         except Exception as e:
-            print(f"\n[DEBUG] Notification exception: {type(e).__name__}: {e}")
-            import traceback
-            traceback.print_exc()
+            logger.warning("Notification exception: %s: %s", type(e).__name__, e)
+            logger.debug("Notification traceback:", exc_info=True)
             return False

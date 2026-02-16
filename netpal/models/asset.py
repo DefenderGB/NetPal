@@ -2,7 +2,7 @@
 Asset model for scan targets (networks, lists, single hosts)
 """
 import os
-from ..utils.file_utils import make_path_relative_to_scan_results
+from ..utils.persistence.file_utils import make_path_relative_to_scan_results
 
 
 class Asset:
@@ -47,15 +47,6 @@ class Asset:
         elif self.type == "single":
             return self.target
         return ""
-    
-    def get_display_name(self):
-        """
-        Get human-readable display name.
-        
-        Returns:
-            Name if set, otherwise identifier
-        """
-        return self.name if self.name else self.get_identifier()
     
     def to_dict(self):
         """Serialize to dictionary"""

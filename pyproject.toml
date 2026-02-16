@@ -4,48 +4,62 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "netpal"
-version = "1.0.1"
+version = "1.1.0"
 description = "NetPal - Automated Network Penetration Testing CLI Tool"
 authors = [{name = "Gustavo Bobbio-Hertog", email = "defender-gb@protonmail.com"}]
 license = {text = "MIT"}
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 keywords = ["penetration testing", "network security", "nmap", "nuclei"]
 classifiers = [
-    "Development Status :: 4 - Beta",
+    "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Information Technology",
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
     "Topic :: Security",
     "Topic :: System :: Networking",
 ]
 dependencies = [
     "psutil>=7.2.2",
     "colorama>=0.4.6",
-    "boto3==1.33.13",
     "xmltodict==0.15.0",
-    "pyyaml>=6.0",
-    "google-genai>=1.61.0",
+    "requests>=2.32.5",
+    "textual>=2.1.0",
+    "textual-serve>=1.1.1",
+    "boto3>=1.33.13",
     "anthropic>=0.77.0",
     "openai>=2.16.0",
+    "google-genai>=1.61.0",
     "ollama>=0.6.1",
-    "requests>=2.32.5"
 ]
 
 [project.urls]
 Homepage = "https://github.com/DefenderGB/NetPal"
-Documentation = "https://github.com/DefenderGB/NetPal/docs"
 Repository = "https://github.com/DefenderGB/NetPal"
-Issues = "https://github.com/DefenderGB/NetPal/issues"
 
 [project.scripts]
 netpal = "netpal.cli:main"
 
 [tool.setuptools]
-packages = ["netpal", "netpal.models", "netpal.services", "netpal.utils", "netpal.config"]
+packages = [
+    "netpal",
+    "netpal.models",
+    "netpal.modes",
+    "netpal.services",
+    "netpal.services.ai",
+    "netpal.services.ai.providers",
+    "netpal.services.aws",
+    "netpal.services.nmap",
+    "netpal.services.tools",
+    "netpal.utils",
+    "netpal.utils.aws",
+    "netpal.utils.display",
+    "netpal.utils.persistence",
+    "netpal.utils.scanning",
+    "netpal.config",
+]
 include-package-data = true
 
 [tool.setuptools.package-data]

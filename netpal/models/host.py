@@ -1,9 +1,8 @@
 """
 Host model for discovered network hosts
 """
-from typing import List, Optional
+from typing import Optional
 from .service import Service
-from .finding import Finding
 
 
 class Host:
@@ -11,8 +10,8 @@ class Host:
     Represents a discovered network host with its services and findings.
     """
     
-    def __init__(self, ip, hostname="", os="", host_id=None, 
-                 services=None, findings=None, assets=None):
+    def __init__(self, ip, hostname="", os="", host_id=None,
+                 services=None, findings=None, assets=None, metadata=None):
         """
         Initialize a Host.
         
@@ -24,6 +23,7 @@ class Host:
             services: List of Service objects
             findings: List of finding IDs associated with this host
             assets: List of asset IDs this host belongs to
+            metadata: Arbitrary key-value metadata dict (e.g. vlan, impact)
         """
         self.ip = ip
         self.hostname = hostname
@@ -32,6 +32,7 @@ class Host:
         self.services = services if services is not None else []
         self.findings = findings if findings is not None else []
         self.assets = assets if assets is not None else []
+        self.metadata = metadata if metadata is not None else {}
     
     def add_service(self, service: Service):
         """
@@ -90,7 +91,8 @@ class Host:
             "os": self.os,
             "assets": self.assets,
             "services": [svc.to_dict() for svc in self.services],
-            "findings": self.findings
+            "findings": self.findings,
+            "metadata": self.metadata,
         }
     
     @classmethod
@@ -105,5 +107,6 @@ class Host:
             host_id=data.get("host_id"),
             services=services,
             findings=data.get("findings", []),
-            assets=data.get("assets", [])
+            assets=data.get("assets", []),
+            metadata=data.get("metadata", {}),
         )

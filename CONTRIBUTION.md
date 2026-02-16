@@ -1,308 +1,319 @@
 # Contributing to NetPal
 
-Thanks for the interest on contribution! This guide will help you understand the project structure and how to add new features.
+This guide covers the project structure and how to extend NetPal.
 
-## Getting Help
+## Contact
 
-For questions, issues, or support, please contact: **defender-gb@protonmail.com**
+**Developer**: defender-gb@protonmail.com
 
 ## Development Setup
 
-### Prerequisites
-- Python 3.10 or higher
-- Git
-- Required external tools (nmap, httpx, nuclei)
+### Quick Start (recommended)
 
-### Setting Up Your Development Environment
+The [`install.sh`](install.sh) script handles everything — installs **uv**, external tools (nmap, httpx, nuclei, AWS CLI), creates a Python 3.12 virtual environment, syncs dependencies, and installs NetPal in editable mode:
 
 ```bash
-# Clone the repository
+git clone https://github.com/DefenderGB/NetPal.git
+cd NetPal
+bash install.sh
+source .venv/bin/activate
+netpal setup
+```
+
+### Manual Setup (using uv directly)
+
+If you already have the required external tools installed and prefer to set up the environment yourself:
+
+```bash
 git clone https://github.com/DefenderGB/NetPal.git
 cd NetPal
 
-# Install in development mode
-python3.10 -m pip install -e . --break-system-packages
+# Install uv if not already available (https://docs.astral.sh/uv/)
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Create virtual environment pinned to Python 3.12
+uv venv --python 3.12
+source .venv/bin/activate
+
+# Sync dependencies from pyproject.toml and install NetPal in editable mode
+uv sync --python 3.12
+uv pip install -e .
+
+# Run the interactive configuration wizard
+netpal setup
+```
+
+### Prerequisites
+
+| Tool | Required | Notes |
+|------|----------|-------|
+| Python 3.12 | Yes | Managed by uv |
+| [uv](https://docs.astral.sh/uv/) | Yes | Installed automatically by `install.sh` |
+| nmap | Yes | Sudo required for SYN scans; `install.sh` offers to configure passwordless sudo |
+| httpx | Yes | ProjectDiscovery HTTP toolkit (requires Go) |
+| Go | Yes | Required to install httpx and nuclei |
+| nuclei | Yes | Vulnerability scanning with templates |
+| AWS CLI | Yes | Only needed for S3 sync |
+
+### Updating an Existing Install
+
+If NetPal is already installed and you need to update in-place:
+
+```bash
+source .venv/bin/activate
+uv sync --python 3.12
+uv pip install -e .
+```
+
+To do a clean reinstall:
+
+```bash
+rm -rf .venv
+bash install.sh
 ```
 
 ## Project Structure
 
 ```
 netpal/
-├── cli.py                    # Main CLI interface
-├── config/                   # Configuration files
-│   ├── config.json          # Main configuration
-│   ├── ai_prompts.json      # AI finding prompts
-│   └── exploit_tools.json   # Tool automation config
-├── models/                   # Data models
-│   ├── project.py           # Project container
-│   ├── asset.py             # Scan target
-│   ├── host.py              # Discovered host
-│   ├── service.py           # Network service
-│   └── finding.py           # Security vulnerability
-├── services/                 # Scanner services
-│   ├── nmap_scanner.py      # Multi-threaded nmap
-│   ├── tool_runner.py       # Tool automation
-│   ├── xml_parser.py        # Nmap XML parsing
-│   ├── ai_analyzer.py       # AI-powered analysis
-│   ├── aws_sync.py          # S3 synchronization
-│   └── notification_service.py # Webhook notifications
-└── utils/                    # Utilities
-    ├── config_loader.py     # Configuration management
-    ├── file_utils.py        # File operations
-    ├── network_utils.py     # Network functions
-    └── validation.py        # Input validation
+├── __init__.py
+├── __main__.py                    # Entry: calls cli.main()
+├── cli.py                         # CLI parser, routing, dashboard, bootstrap
+├── tui.py                         # Interactive TUI (Textual) — netpal interactive
+├── config/
+│   ├── config.json                # Runtime configuration
+│   ├── ai_prompts.json            # AI finding prompts
+│   └── exploit_tools.json         # Tool automation config
+├── models/                        # Data models
+│   ├── project.py                 # Project container
+│   ├── asset.py                   # Scan target
+│   ├── host.py                    # Discovered host
+│   ├── service.py                 # Network service
+│   └── finding.py                 # Security finding
+├── modes/                         # Subcommand handlers (Template Method)
+│   ├── __init__.py                # Exports all handlers
+│   ├── base_handler.py            # Abstract ModeHandler base class
+│   ├── asset_create_handler.py    # netpal asset-create
+│   ├── auto_handler.py            # netpal auto (fully automated pipeline)
+│   ├── recon_cli_handler.py       # netpal recon
+│   ├── ai_review_handler.py       # netpal ai-review
+│   ├── ai_enhance_handler.py      # netpal ai-report-enhance
+│   ├── findings_cli_handler.py    # netpal findings
+│   ├── pull_handler.py            # netpal pull
+│   └── setup_handler.py           # netpal setup
+├── services/                      # Core services
+│   ├── nmap_scanner.py            # Multi-threaded nmap (deprecated facade)
+│   ├── tool_runner.py             # Tool automation (deprecated facade)
+│   ├── xml_parser.py              # Nmap XML parsing
+│   ├── ai_analyzer.py             # AI analysis (deprecated facade)
+│   ├── aws_sync.py                # S3 synchronization
+│   ├── notification_service.py    # Webhook notifications
+│   ├── ai/                        # AI provider system
+│   │   ├── analyzer.py            # Main AI analyzer
+│   │   ├── base_provider.py       # Abstract provider interface
+│   │   ├── context_builder.py     # Builds AI context from evidence
+│   │   ├── finding_enhancer.py    # AI QA enhancement
+│   │   ├── provider_factory.py    # Creates provider instances
+│   │   └── providers/             # Provider implementations
+│   │       ├── anthropic_provider.py
+│   │       ├── azure_provider.py
+│   │       ├── bedrock_provider.py
+│   │       ├── gemini_provider.py
+│   │       ├── ollama_provider.py
+│   │       └── openai_provider.py
+│   ├── nmap/                      # Nmap subsystem
+│   │   ├── command_builder.py     # Builds nmap command strings
+│   │   └── scanner.py             # Scanner orchestrator (sequential execution)
+│   └── tools/                     # Tool runner subsystem
+│       ├── base.py                # Abstract tool runner
+│       ├── http_tool_runner.py    # HTTP-based tools
+│       ├── httpx_runner.py        # httpx integration
+│       ├── nmap_script_runner.py  # Nmap NSE scripts
+│       ├── nuclei_runner.py       # Nuclei vulnerability scanning
+│       └── tool_orchestrator.py   # Coordinates tool execution
+└── utils/                         # Shared utilities
+    ├── ai_helpers.py              # AI workflow helpers
+    ├── ai_validation.py           # AI config validation (deprecated — use ProviderFactory.validate())
+    ├── asset_factory.py           # Asset creation factory
+    ├── aws_utils.py               # AWS session/sync setup helpers
+    ├── config_loader.py           # JSON configuration management
+    ├── display_utils.py           # Banner, next-command box, formatting
+    ├── file_utils.py              # File I/O operations
+    ├── finding_viewer.py          # Finding summary display
+    ├── image_loader.py            # Screenshot loading for AI
+    ├── logger.py                  # Centralized logging (get_logger / setup_logging)
+    ├── naming_utils.py            # Name sanitization
+    ├── network_utils.py           # CIDR validation, subnet splitting
+    ├── next_command.py            # Next-command suggestion engine
+    ├── project_paths.py           # Project path resolution
+    ├── project_persistence.py     # Save/sync project data (ProjectPersistence.save_and_sync)
+    ├── project_utils.py           # Project load/create helpers
+    ├── pull_utils.py              # S3 pull operations
+    ├── recon_executor.py          # Recon scan execution
+    ├── scan_helpers.py            # Scan phase helpers
+    ├── setup_wizard.py            # Setup wizard logic
+    ├── tool_paths.py              # External tool detection
+    └── validation.py              # Input validation
 ```
 
-### Key Components
+## Architecture
 
-#### Models (`netpal/models/`)
-Data structures representing scan entities:
-- **project.py**: Top-level container for all scan data
-- **asset.py**: Target definition (network, list, or single host)
-- **host.py**: Discovered host with services and findings
-- **service.py**: Network service on a specific port
-- **finding.py**: Security vulnerability or issue
+### CLI Entry Point (`cli.py`)
 
-#### Services (`netpal/services/`)
-Core functionality modules:
-- **nmap_scanner.py**: Multi-threaded scanning with network chunking
-- **tool_runner.py**: Automated security tool execution
-- **xml_parser.py**: Nmap XML output parsing
-- **ai_analyzer.py**: AI-powered finding generation
-- **aws_sync.py**: S3 synchronization for collaboration
-- **notification_service.py**: Webhook notifications (Slack/Discord)
+The `main()` function in `cli.py` is the single entry point. It uses `argparse` subparsers for the `netpal <verb>` syntax:
 
-#### Utils (`netpal/utils/`)
-Helper functions and utilities:
-- **config_loader.py**: Configuration file management
-- **file_utils.py**: File I/O operations
-- **network_utils.py**: Network address manipulation
-- **validation.py**: Input validation and sanitization
+```
+netpal                          → display_dashboard()
+netpal asset-create …           → AssetCreateHandler
+netpal recon …                  → ReconCLIHandler
+netpal auto …                   → AutoHandler
+netpal ai-review …              → AIReviewHandler
+netpal ai-report-enhance …     → AIEnhanceHandler
+netpal findings …               → FindingsCLIHandler
+netpal setup                    → SetupHandler
+netpal pull …                   → PullHandler
+netpal interactive              → tui.run_interactive()
+```
+
+The `_bootstrap_project(args)` helper loads config, sets up AWS sync, and loads the active project. All subcommand routes (except `setup` and dashboard) call it first.
+
+### Mode Handlers (`modes/`)
+
+Every subcommand handler extends `ModeHandler` (Template Method pattern):
+
+```python
+class ModeHandler(ABC):
+    def execute(self) -> int:
+        self.display_banner()
+        if not self.validate_prerequisites():
+            return 1
+        context = self.prepare_context()
+        if context is None:
+            return 1
+        result = self.execute_workflow(context)
+        if result:
+            self.save_results(result)
+            self.sync_if_enabled()
+            self.display_completion(result)
+            self.suggest_next_command(result)  # ← next-step hint
+        return 0 if result else 1
+```
+
+To add a new subcommand:
+
+1. Create `netpal/modes/my_handler.py` extending `ModeHandler`
+2. Implement the abstract methods: `display_banner()`, `validate_prerequisites()`, `prepare_context()`, `execute_workflow()`
+3. Override `suggest_next_command()` to call `NextCommandSuggester`
+4. Add a subparser in `create_argument_parser()` in `cli.py`
+5. Add a routing entry in the `handlers` dict in `main()`
+6. Export from `netpal/modes/__init__.py`
+
+### Next-Command Suggestion Engine (`utils/next_command.py`)
+
+`NextCommandSuggester` prints a contextual "next step" box after each command. It has two modes:
+
+- **Post-command** (`suggest(event, project, args)`): Looks up the event in `COMMAND_FLOW` and fills in template variables from args.
+- **State-based** (`suggest_for_project(project, config)`): Inspects project state to determine what's missing.
+
+The state machine:
+
+```
+no config       → netpal setup
+no assets       → netpal asset-create
+no hosts        → netpal recon --type nmap-discovery
+no services     → netpal recon --type top100
+no findings     → netpal ai-review
+not enhanced    → netpal ai-report-enhance
+enhanced        → netpal findings
+```
+
+### Asset Factory (`utils/asset_factory.py`)
+
+Two factory methods:
+- `create_asset(type, name, id, data)` — low-level creation
+- `create_from_subcommand_args(args, project)` — subparser args (`--range`, `--targets`, `--target`, `--file`)
 
 ## Adding Custom Automated Tools
 
-NetPal can automatically execute security tools when specific conditions are met. Tools are configured in `netpal/config/exploit_tools.json`.
+Tools are configured in `netpal/config/exploit_tools.json` and execute automatically when matching services are discovered.
 
-### Tool Configuration Format
+### Tool Types
+
+| Type | Description |
+|---|---|
+| `nmap_custom` | Custom nmap NSE scripts |
+| `http_custom` | HTTP tools with regex triggers |
+| `nuclei` | Nuclei vulnerability templates |
+
+### Configuration Format
 
 ```json
 {
   "port": [445, 139],
-  "service_name": ["microsoft-ds", "netbios-ssn", "smb"],
+  "service_name": ["microsoft-ds", "netbios-ssn"],
   "tool_name": "SMB Vulnerability Scan",
   "tool_type": "nmap_custom",
   "command": "nmap -p {port} --script smb-vuln* {ip}"
 }
 ```
 
-### Tool Types
+### Placeholders
 
-#### 1. `nmap_custom` - Custom Nmap NSE Scripts
-Execute nmap with specific NSE scripts:
+- `{ip}` — target IP
+- `{port}` — port number
+- `{protocol}` — `http` or `https`
+- `{path/to/upload/file.txt}` — auto-generated output path
 
-```json
-{
-  "port": [3389],
-  "service_name": ["ms-wbt-server"],
-  "tool_name": "RDP Security Check",
-  "tool_type": "nmap_custom",
-  "command": "nmap -p {port} --script rdp-enum-encryption {ip}"
-}
-```
+### Trigger Logic
 
-#### 2. `http_custom` - HTTP-Based Tools with Regex Triggers
-Tools that trigger based on HTTP response content:
+Tools run when a matching port **or** service name is found. For `http_custom` tools, the HTTP response must also match the `regex_match` pattern.
 
-```json
-{
-  "port": [80, 443],
-  "service_name": ["http", "https"],
-  "tool_name": "Git Directory Exposure",
-  "tool_type": "http_custom",
-  "regex_match": "HTTP\\/1\\.1 200 OK",
-  "command": "nuclei -u {protocol}://{ip}:{port} -t git-config.yaml -o {path/to/upload/file.txt}"
-}
-```
+### Re-run Policy (`--rerun-autotools`)
 
-#### 3. `nuclei` - Nuclei Vulnerability Templates
-Nuclei-specific vulnerability scanning:
+Auto-tools respect a re-run policy that prevents needless re-execution when a tool has already produced output for a given host/port. The policy is set via `--rerun-autotools` on both the `recon` and `auto` subcommands (default: `2`):
 
-```json
-{
-  "port": [80, 443, 8080],
-  "service_name": ["http", "https"],
-  "tool_name": "Web Vulnerabilities",
-  "tool_type": "nuclei",
-  "command": "nuclei -u {protocol}://{ip}:{port} -severity critical,high -o {path/to/upload/file.txt}"
-}
-```
+| Value | Behaviour |
+|-------|-----------|
+| `Y`   | **Always** re-run every tool, even if it already ran |
+| `N`   | **Never** re-run — skip any tool that already has a proof recorded |
+| `2`   | Re-run only if the tool's last execution was **more than 2 days ago** (default) |
+| `7`   | Re-run only if the tool's last execution was **more than 7 days ago** |
 
-### Available Placeholders
+The check uses the `utc_ts` timestamp stored in each service proof. Any positive integer is accepted as a day threshold.
 
-When writing tool commands, use these placeholders:
-- **{ip}**: Target IP address
-- **{port}**: Port number
-- **{protocol}**: `http` or `https` (for web services)
-- **{path/to/upload/file.txt}**: Auto-generated output file path
+In the TUI, a "Re-run auto-tools" dropdown provides the same options (2 days, 7 days, Always, Never).
 
-### Tool Trigger Logic
+## Adding a New AI Provider
 
-Tools execute when:
-1. A matching port is discovered (from the `port` array)
-2. A matching service name is detected (from the `service_name` array)
-3. For `http_custom` tools: HTTP content matches the `regex_match` pattern
+1. Create `netpal/services/ai/providers/my_provider.py` extending `BaseProvider`
+2. Implement `analyze()` and `enhance()` methods
+3. Register in `netpal/services/ai/provider_factory.py`
+4. Add config keys (e.g., `ai_my_token`, `ai_my_model`)
+5. Update the setup wizard in `netpal/utils/setup_wizard.py`
 
-### Example: Adding a MySQL Enumeration Tool
+## Interactive TUI (`tui.py`)
 
-```json
-{
-  "port": [3306],
-  "service_name": ["mysql"],
-  "tool_name": "MySQL Enumeration",
-  "tool_type": "nmap_custom",
-  "command": "nmap -p {port} --script mysql-enum,mysql-info {ip}"
-}
-```
+The TUI (`netpal interactive`) uses Textual and provides a state-driven, non-linear interface with five views: Projects, Assets, Recon, Evidence, and Settings. Views unlock progressively based on project state.
 
-### Example: Adding a Custom HTTP Scanner
+To add a new TUI view:
 
-```json
-{
-  "port": [80, 443, 8080],
-  "service_name": ["http", "https"],
-  "tool_name": "Admin Panel Discovery",
-  "tool_type": "http_custom",
-  "regex_match": "200",
-  "command": "ffuf -u {protocol}://{ip}:{port}/FUZZ -w /path/to/wordlist.txt -o {path/to/upload/file.txt}"
-}
-```
+1. Define a new view widget class extending `VerticalScroll` in `netpal/tui.py`
+2. Add a `VIEW_*` constant and entry in `VIEW_LABELS`
+3. Mount the widget inside the `ContentSwitcher` in `NetPalApp.compose()`
+4. Add a key binding in `BINDINGS`
+5. Update `_allowed_views()` with any unlock conditions
+6. Add the view class to `_refresh_active_view()`
 
-## Contributing Code
+## Adding New Scan Types
 
-### Workflow
+1. Add the choice to the `recon` subparser in `create_argument_parser()` in `cli.py`
+2. Handle the new type in `ReconCLIHandler.execute_workflow()`
+3. Define the nmap options in `netpal/services/nmap/command_builder.py`
 
-1. **Fork the repository**
-   ```bash
-   # Click the "Fork" button on GitHub
-   git clone https://github.com/DefenderGB/NetPal.git
-   ```
+## Testing
 
-2. **Create a feature branch**
-   ```bash
-   git checkout -b feature/amazing-feature
-   ```
-
-3. **Make your changes**
-   - Write clean, documented code
-   - Follow existing code style
-   - Test your changes thoroughly
-
-4. **Commit your changes**
-   ```bash
-   git add .
-   git commit -m 'Add amazing feature: detailed description'
-   ```
-
-5. **Push to your fork**
-   ```bash
-   git push origin feature/amazing-feature
-   ```
-
-6. **Open a Pull Request**
-   - Go to the original repository on GitHub
-   - Click "New Pull Request"
-   - Select your feature branch
-   - Provide a clear description of your changes
-
-### Code Style Guidelines
-
-- Follow PEP 8 for Python code
-- Use meaningful variable and function names
-- Add docstrings to functions and classes
-- Keep functions focused and single-purpose
-- Comment complex logic
-
-### Testing
-
-Before submitting a PR:
-- Test all modified functionality
-- Verify no existing features are broken
-- Test with different scan types and configurations
-- Check error handling
-
-### Documentation
-
-When adding features:
-- Update README.md if user-facing
-- Update CONTRIBUTION.md if developer-facing
-- Add inline code comments for complex logic
-- Update configuration examples if needed
-
-## Extending NetPal
-
-### Adding a New AI Provider
-
-To add support for a new AI provider:
-
-1. Edit `netpal/services/ai_analyzer.py`
-2. Add configuration parameters to `config.json`
-3. Implement the API integration
-4. Update setup wizard in `cli.py`
-5. Document in README.md
-
-### Adding New Scan Types
-
-To add a new scan type:
-
-1. Edit `netpal/cli.py` - add to scan type choices
-2. Define nmap options for the new scan type
-3. Update documentation
-4. Test thoroughly
-
-### Adding New Models
-
-When adding data models:
-
-1. Create new model file in `netpal/models/`
-2. Implement serialization methods (`to_dict()`, `from_dict()`)
-3. Update project structure if needed
-4. Document the model structure
-
-## Configuration Files
-
-### config.json
-Main configuration file - see setup wizard for options
-
-### ai_prompts.json
-AI prompt templates for finding generation
-
-### exploit_tools.json
-Automated tool execution configurations
-
-## Best Practices
-
-1. **Always test with small targets first**: Use /27 or /28 networks for testing
-2. **Handle errors gracefully**: All functions should handle exceptions
-3. **Log important events**: Use logging for debugging
-4. **Validate user input**: Check inputs before processing
-5. **Document edge cases**: Comment unusual situations
-6. **Keep dependencies minimal**: Only add necessary packages
-7. **Maintain backward compatibility**: Don't break existing projects
-
-## Security Considerations
-
-When contributing:
-- Never commit API keys or credentials
-- Validate all user inputs
-- Sanitize file paths
-- Be cautious with command execution
-- Follow principle of least privilege
-
-## Questions or Issues?
-
-- **Email**: defender-gb@protonmail.com
-- **GitHub Issues**: https://github.com/DefenderGB/NetPal/issues
-
-## License
-
-By contributing, you agree that your contributions will be licensed under the MIT License.
+Before submitting changes:
+- Verify `python3 -m py_compile` passes on all modified files
+- Test affected subcommands end-to-end
+- Verify `--help` output is correct
+- Check next-command suggestions print for relevant transitions

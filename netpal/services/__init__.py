@@ -1,10 +1,19 @@
 """
-Scanner and automation services for NetPal
-"""
+Scanner and automation services for NetPal.
 
-from .nmap_scanner import NmapScanner
+Provides modular service packages:
+- nmap/ - Network scanning with builder and executor patterns
+- ai/ - AI-powered analysis with provider architecture
+- tools/ - Security tool execution with focused runners
+"""
+from .nmap.scanner import NmapScanner
 from .tool_runner import ToolRunner
 from .xml_parser import NmapXmlParser
-from .ai_analyzer import AIAnalyzer
+from .ai.analyzer import AIAnalyzer
 
-__all__ = ['NmapScanner', 'ToolRunner', 'NmapXmlParser', 'AIAnalyzer']
+__all__ = [
+    'NmapScanner',
+    'ToolRunner',
+    'NmapXmlParser',
+    'AIAnalyzer',
+]
