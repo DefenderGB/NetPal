@@ -7,13 +7,13 @@ Provides modular service packages:
 - tools/ - Security tool execution with focused runners
 """
 from .nmap.scanner import NmapScanner
-from .tool_runner import ToolRunner
 from .xml_parser import NmapXmlParser
 from .ai.analyzer import AIAnalyzer
+from .tools.tool_orchestrator import ToolOrchestrator
 
 __all__ = [
     'NmapScanner',
-    'ToolRunner',
+    'ToolOrchestrator',
     'NmapXmlParser',
     'AIAnalyzer',
 ]

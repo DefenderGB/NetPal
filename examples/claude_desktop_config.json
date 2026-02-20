@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "netpal": {
+      "command": "uv",
+      "args": [
+        "--directory",
+        "/path/to/NetPal",
+        "run",
+        "netpal-mcp"
+      ],
+      "timeout": 600
+    }
+  }
+}

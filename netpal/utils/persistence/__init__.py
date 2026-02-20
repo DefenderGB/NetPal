@@ -30,13 +30,16 @@ from .project_persistence import (
     save_project_to_file,
     save_findings_to_file,
     sync_to_s3_if_enabled,
+    push_project_to_s3,
     ProjectPersistence,
 )
 from .project_utils import (
+    resolve_project_by_identifier,
     select_or_sync_project,
     select_from_local_projects,
     update_config_project_name,
     load_or_create_project,
+    create_project_headless,
 )
 
 __all__ = [
@@ -65,10 +68,13 @@ __all__ = [
     'save_project_to_file',
     'save_findings_to_file',
     'sync_to_s3_if_enabled',
+    'push_project_to_s3',
     'ProjectPersistence',
     # project_utils
+    'resolve_project_by_identifier',
     'select_or_sync_project',
     'select_from_local_projects',
     'update_config_project_name',
     'load_or_create_project',
+    'create_project_headless',
 ]

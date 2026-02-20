@@ -27,7 +27,7 @@ class ToolExecutionResult:
         findings: List of Finding objects discovered
         error: Error message if execution failed
         screenshot: Optional screenshot file path
-        response_file: Optional HTTP response file path (httpx -srd)
+        response_file: Optional HTTP response file path
     """
     
     def __init__(
@@ -171,13 +171,13 @@ class BaseToolRunner(ABC):
         """Build a standardized output filename.
         
         Args:
-            tool_prefix: Tool name prefix (e.g., 'auto_httpx', 'nuclei')
+            tool_prefix: Tool name prefix (e.g., 'auto_playwright', 'nuclei')
             host_ip: Host IP address
             port: Service port number
             extension: File extension (e.g., '.txt', '.jsonl')
             
         Returns:
-            Filename string like 'auto_httpx_192-168-1-1_80_1707753600.txt'
+            Filename string like 'auto_playwright_192-168-1-1_80_1707753600.txt'
         """
         safe_ip = sanitize_ip_for_filename(host_ip)
         timestamp = int(time.time())
@@ -198,7 +198,7 @@ class BaseToolRunner(ABC):
         Handles sudo user's GO bin directory resolution.
         
         Args:
-            tool_name: Name of the GO tool (e.g., 'nuclei', 'httpx')
+            tool_name: Name of the GO tool (e.g., 'nuclei')
             
         Returns:
             Full path to tool binary, or tool name if not found in GO bin

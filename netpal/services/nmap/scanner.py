@@ -3,7 +3,6 @@ Nmap scanner service with sequential execution and chunking support.
 """
 import subprocess
 import os
-import sys
 import time
 from typing import List, Tuple, Callable, Optional
 
@@ -424,10 +423,10 @@ class NmapScanner:
             Tuple of (hosts_list, error_message)
         """
         try:
-            # Start process - keep stdin connected for interactive status (spacebar)
+            # Periodic progress is provided by --stats-every instead.
             process = subprocess.Popen(
                 cmd,
-                stdin=sys.stdin,
+                stdin=subprocess.DEVNULL,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 universal_newlines=True,
@@ -439,10 +438,14 @@ class NmapScanner:
             
             # Read output synchronously — one line at a time
             output_lines = []
+            interface_error = False
             for line in process.stdout:
                 if callback:
                     callback(line)
                 output_lines.append(line)
+                # Detect VPN / interface drop mid-scan
+                if 'pcap_next_ex' in line and 'interface disappeared' in line.lower():
+                    interface_error = True
             
             # Wait for process to finish
             return_code = process.wait()
@@ -455,15 +458,36 @@ class NmapScanner:
             if output_file:
                 self._chown_to_user(output_file)
             
-            # Parse results if successful
-            if return_code == 0 and output_file and os.path.exists(output_file):
+            # Treat interface-disappeared as a fatal scan error regardless
+            # of the return code — partial results cannot be trusted.
+            if interface_error:
+                error_msg = (
+                    "Scan aborted: network interface disappeared (VPN/tunnel dropped?). "
+                    "Partial results have been discarded."
+                )
+                return [], error_msg
+            
+            # Parse results if output XML exists
+            if output_file and os.path.exists(output_file):
                 hosts = NmapXmlParser.parse_xml_file(output_file)
-                return hosts, None
-            else:
+                if hosts:
+                    if return_code != 0:
+                        if callback:
+                            callback(
+                                f"\n[WARNING] nmap exited with code {return_code} "
+                                f"but XML output was parsed successfully "
+                                f"({len(hosts)} host(s))\n"
+                            )
+                    return hosts, None
+
+            # No usable output
+            if return_code != 0:
                 error_msg = f"Scan failed with return code {return_code}"
                 if output_lines:
                     error_msg += f"\nOutput: {''.join(output_lines[-10:])}"  # Last 10 lines
                 return [], error_msg
+
+            return [], None
         
         except Exception as e:
             return [], f"Error executing scan: {e}"

@@ -1,7 +1,15 @@
 #!/bin/bash
 # NetPal Installation Script
+# Usage: bash install.sh [no_nuclei]
+#   no_nuclei  — skip nuclei installation (useful when nuclei is installed separately)
 
 set -e
+
+# ── Parse arguments ────────────────────────────────────────────────────────
+SKIP_NUCLEI=false
+if [[ "$1" == "no_nuclei" ]]; then
+    SKIP_NUCLEI=true
+fi
 
 # ── Detect OS ──────────────────────────────────────────────────────────────
 
@@ -51,7 +59,7 @@ echo "================================================"
 
 # Track installation status
 NMAP_INSTALLED=false
-HTTPX_INSTALLED=false
+PLAYWRIGHT_INSTALLED=false
 AWS_INSTALLED=false
 NUCLEI_INSTALLED=false
 GO_INSTALLED=false
@@ -146,31 +154,10 @@ else
     fi
 fi
 
-# ── httpx ──────────────────────────────────────────────────────────────────
+# ── Playwright is installed as a Python dependency via pyproject.toml ─────
+# The browser binaries are installed after the venv is set up (see below).
 
-echo ""
-echo "[INFO] Checking for httpx..."
-if command -v httpx &> /dev/null; then
-    echo "✓ httpx is installed: $(httpx -version 2>&1 | head -1)"
-    HTTPX_INSTALLED=true
-else
-    echo "✗ httpx is NOT installed"
-    if [[ "$GO_INSTALLED" == true ]]; then
-        read -p "Install httpx? (Y/N): " -n 1 -r
-        echo
-        if [[ $REPLY =~ ^[Yy]$ ]]; then
-            go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest
-            export PATH=$PATH:$HOME/go/bin
-
-            if command -v httpx &> /dev/null; then
-                echo "✓ httpx installed: $(httpx -version 2>&1 | head -1)"
-                HTTPX_INSTALLED=true
-            fi
-        fi
-    else
-        echo "✗ Go is required to install httpx"
-    fi
-fi
+PLAYWRIGHT_INSTALLED=true
 
 # ── AWS CLI (optional) ────────────────────────────────────────────────────
 
@@ -207,26 +194,30 @@ fi
 # ── nuclei (optional) ─────────────────────────────────────────────────────
 
 echo ""
-echo "[INFO] Checking for nuclei (optional but recommended)..."
-if command -v nuclei &> /dev/null; then
-    echo "✓ nuclei is installed: $(nuclei -version 2>&1 | head -1)"
-    NUCLEI_INSTALLED=true
+if [[ "$SKIP_NUCLEI" == true ]]; then
+    echo "[INFO] Skipping nuclei installation (no_nuclei flag set)"
 else
-    echo "○ nuclei is not installed (optional but recommended)"
-    if [[ "$GO_INSTALLED" == true ]]; then
-        read -p "Install nuclei? (Y/N): " -n 1 -r
-        echo
-        if [[ $REPLY =~ ^[Yy]$ ]]; then
-            go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
-            export PATH=$PATH:$HOME/go/bin
-
-            if command -v nuclei &> /dev/null; then
-                echo "✓ nuclei installed: $(nuclei -version 2>&1 | head -1)"
-                NUCLEI_INSTALLED=true
-            fi
-        fi
+    echo "[INFO] Checking for nuclei (optional but recommended)..."
+    if command -v nuclei &> /dev/null; then
+        echo "✓ nuclei is installed: $(nuclei -version 2>&1 | head -1)"
+        NUCLEI_INSTALLED=true
     else
-        echo "✗ Go is required to install nuclei"
+        echo "○ nuclei is not installed (optional but recommended)"
+        if [[ "$GO_INSTALLED" == true ]]; then
+            read -p "Install nuclei? (Y/N): " -n 1 -r
+            echo
+            if [[ $REPLY =~ ^[Yy]$ ]]; then
+                go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
+                export PATH=$PATH:$HOME/go/bin
+
+                if command -v nuclei &> /dev/null; then
+                    echo "✓ nuclei installed: $(nuclei -version 2>&1 | head -1)"
+                    NUCLEI_INSTALLED=true
+                fi
+            fi
+        else
+            echo "✗ Go is required to install nuclei"
+        fi
     fi
 fi
 
@@ -252,7 +243,7 @@ if [ -d ".venv" ] && .venv/bin/python -c "import netpal" 2>/dev/null; then
     exit 0
 fi
 
-if [ "$NMAP_INSTALLED" = true ] && [ "$HTTPX_INSTALLED" = true ]; then
+if [ "$NMAP_INSTALLED" = true ]; then
     echo "✓ All required external tools are installed!"
     echo ""
 
@@ -274,6 +265,12 @@ if [ "$NMAP_INSTALLED" = true ] && [ "$HTTPX_INSTALLED" = true ]; then
     echo "[INFO] Installing NetPal in editable mode..."
     uv pip install -e .
     echo "✓ NetPal installed"
+
+    # Install Playwright browser binaries (Chromium)
+    echo ""
+    echo "[INFO] Installing Playwright Chromium browser..."
+    uv run playwright install --with-deps chromium
+    echo "✓ Playwright Chromium browser installed"
 
     # ── Passwordless sudo for nmap and chown ──────────────────────────────────
 
@@ -323,7 +320,7 @@ if [ "$NMAP_INSTALLED" = true ] && [ "$HTTPX_INSTALLED" = true ]; then
     echo ""
     echo "Required tools:"
     echo "  ✓ nmap installed"
-    echo "  ✓ httpx installed"
+    echo "  ✓ playwright installed (Chromium browser)"
     echo ""
     echo "Optional tools:"
     if [ "$AWS_INSTALLED" = true ]; then
@@ -337,14 +334,14 @@ if [ "$NMAP_INSTALLED" = true ] && [ "$HTTPX_INSTALLED" = true ]; then
         echo "  ○ nuclei not installed (optional but recommended)"
     fi
     echo ""
-    echo "To activate the environment in a new shell:"
+    echo "First activate the environment:"
     echo "  source .venv/bin/activate"
     echo ""
-    echo "Next steps:"
-    echo "  1. Run: netpal setup"
-    echo "  2. Start scanning: netpal assets network --name DMZ --range 10.0.0.0/24"
+    echo "If not setup, then run and then scan:"
+    echo "  1. netpal setup"
+    echo "  2. netpal auto --project 'My Network' --range '10.0.0.0/24' --interface en0"
     echo ""
-    echo "To configure AWS profile for S3 sync:"
+    echo "If AWS S3 is not setup, configure AWS profile for S3 sync:"
     echo "  aws configure set aws_access_key_id \"YOUR_KEY\" --profile netpal-user"
     echo "  aws configure set aws_secret_access_key \"YOUR_SECRET\" --profile netpal-user"
     echo "  aws configure set region us-west-2 --profile netpal-user"
@@ -359,11 +356,6 @@ else
         echo "  ✓ nmap installed"
     else
         echo "  ✗ nmap NOT installed (REQUIRED)"
-    fi
-    if [ "$HTTPX_INSTALLED" = true ]; then
-        echo "  ✓ httpx installed"
-    else
-        echo "  ✗ httpx NOT installed (REQUIRED)"
     fi
     echo ""
     echo "Optional tools status:"

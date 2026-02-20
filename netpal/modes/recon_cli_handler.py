@@ -11,12 +11,15 @@ class ReconCLIHandler(ModeHandler):
         super().__init__(netpal_instance)
         self.args = args
         self.asset = None
-        self._target_mode = None   # 'asset', 'discovered', 'discovered_asset', or 'host'
+        self._target_mode = None   # 'asset', 'discovered', 'discovered_asset', 'host', or 'chunk'
         self._host_ips = []        # IPs to scan for --discovered / --host
+        self._resume_chunk = None  # chunk filename stem for resume
     
     def display_banner(self):
         scan_label = self.args.scan_type or 'recon'
-        if self._target_mode == 'discovered':
+        if self._target_mode == 'chunk':
+            target_label = f"chunk resume: {self._resume_chunk}"
+        elif self._target_mode == 'discovered':
             target_label = f"all discovered hosts ({len(self._host_ips)})"
         elif self._target_mode == 'discovered_asset':
             target_label = f"discovered hosts in {self.args.asset} ({len(self._host_ips)})"
@@ -65,11 +68,17 @@ class ReconCLIHandler(ModeHandler):
                 if a.name == self.args.asset:
                     self.asset = a
                     break
-            
+
             if not self.asset:
-                print(f"{Fore.RED}[ERROR] Asset '{self.args.asset}' not found{Style.RESET_ALL}")
-                print(f"{Fore.YELLOW}[TIP] List assets: netpal assets --list{Style.RESET_ALL}")
-                return False
+                # Asset not found — check if this is a chunk file name
+                chunk_name = self.args.asset
+                if self._resolve_chunk_file(chunk_name):
+                    # Successfully resolved as a chunk file
+                    pass
+                else:
+                    print(f"{Fore.RED}[ERROR] Asset '{self.args.asset}' not found{Style.RESET_ALL}")
+                    print(f"{Fore.YELLOW}[TIP] List assets: netpal assets --list{Style.RESET_ALL}")
+                    return False
 
         elif self._target_mode == 'discovered_asset':
             # Find asset by name, then get its discovered hosts
@@ -120,7 +129,38 @@ class ReconCLIHandler(ModeHandler):
         if self.args.scan_type == 'custom' and not self.args.nmap_options:
             print(f"{Fore.RED}[ERROR] --nmap-options required for custom scan type{Style.RESET_ALL}")
             return False
-        
+
+        return True
+
+    def _resolve_chunk_file(self, chunk_name):
+        """Check if *chunk_name* matches a chunk file on disk.
+
+        Uses the shared :func:`resolve_chunk_by_name` helper.  When found,
+        sets ``_target_mode`` to ``'chunk'`` and populates ``_host_ips``,
+        ``_resume_chunk``, and ``self.asset``.
+
+        Returns True if resolved, False otherwise.
+        """
+        from ..utils.scanning.scan_helpers import resolve_chunk_by_name
+
+        asset_obj, ips, chunk_path = resolve_chunk_by_name(
+            self.project.project_id, self.project.assets, chunk_name
+        )
+        if asset_obj is None:
+            return False
+        if not ips:
+            print(f"{Fore.YELLOW}[WARNING] Chunk file '{chunk_name}' is empty{Style.RESET_ALL}")
+            return False
+
+        import os
+        self.asset = asset_obj
+        self._target_mode = 'chunk'
+        self._host_ips = ips
+        self._resume_chunk = chunk_name.replace('.txt', '')
+        print(
+            f"{Fore.GREEN}[INFO] Resolved chunk file: {os.path.basename(chunk_path)} "
+            f"({len(ips)} hosts) in asset '{asset_obj.name}'{Style.RESET_ALL}"
+        )
         return True
     
     def prepare_context(self):
@@ -129,15 +169,20 @@ class ReconCLIHandler(ModeHandler):
         self.netpal.scanner = NmapScanner(config=self.config)
         self.scanner = self.netpal.scanner
         
+        # Force -Pn when scanning already-discovered hosts or a specific host
+        skip_discovery = self.args.skip_discovery
+        if self._target_mode in ('discovered', 'discovered_asset', 'host', 'chunk'):
+            skip_discovery = True
+        
         return {
             'asset': self.asset,
             'scan_type': self.args.scan_type,
             'speed': self.args.speed,
-            'skip_discovery': self.args.skip_discovery,
-            'run_tools': self.args.run_tools,
+            'skip_discovery': skip_discovery,
             'target_mode': self._target_mode,
             'host_ips': self._host_ips,
             'rerun_autotools': getattr(self.args, 'rerun_autotools', '2'),
+            'resume_chunk': self._resume_chunk,
         }
     
     def execute_workflow(self, context):
@@ -148,7 +193,8 @@ class ReconCLIHandler(ModeHandler):
         
         if scan_type == 'nmap-discovery' and target_mode == 'asset':
             # Discovery scan (only makes sense with an asset)
-            hosts = self.netpal.run_discovery(asset, speed=context['speed'])
+            verbose = self.args.verbose if hasattr(self.args, 'verbose') else False
+            hosts = self.netpal.run_discovery(asset, speed=context['speed'], verbose=verbose)
             if hosts:
                 print(f"\n{Fore.GREEN}[SUCCESS] Discovered {len(hosts)} host(s){Style.RESET_ALL}")
             return True
@@ -164,8 +210,8 @@ class ReconCLIHandler(ModeHandler):
         interface = self.args.interface or self.config.get('network_interface')
         nmap_options = self.args.nmap_options if scan_type == 'custom' else ""
 
-        if target_mode in ('discovered', 'discovered_asset'):
-            # Scan discovered hosts — use __ALL_HOSTS__ marker
+        if target_mode in ('discovered', 'discovered_asset', 'chunk'):
+            # Scan discovered hosts / chunk — use __ALL_HOSTS__ marker
             # which execute_recon_scan already understands
             target = "__ALL_HOSTS__"
         elif target_mode == 'host':
@@ -175,22 +221,18 @@ class ReconCLIHandler(ModeHandler):
             # Scan full asset
             target = asset.get_identifier()
 
-        execute_recon_with_tools(
+        scan_ok = execute_recon_with_tools(
             self.netpal, asset, target,
             interface, scan_type, nmap_options,
             speed=context['speed'],
             skip_discovery=context['skip_discovery'],
             verbose=self.args.verbose if hasattr(self.args, 'verbose') else False,
             rerun_autotools=context['rerun_autotools'],
+            host_ips=host_ips if host_ips else None,
+            resume_chunk=context.get('resume_chunk'),
         )
         
-        # Optionally run exploit tools
-        if context['run_tools']:
-            hosts_with_services = [h for h in self.project.hosts if h.services]
-            if hosts_with_services:
-                self.netpal._run_exploit_tools_cli(hosts_with_services)
-        
-        return True
+        return scan_ok
     
     def suggest_next_command(self, result):
         scan_type = self.args.scan_type

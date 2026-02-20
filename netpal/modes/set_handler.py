@@ -1,8 +1,9 @@
-"""Set handler — switch the active project by name or UUID.
+"""Set handler — switch the active project by name, ID, or external ID.
 
 Usage:
     netpal set "ProjectName"
-    netpal set "abc12345-..."
+    netpal set "NETP-2602-ABCD"
+    netpal set "PEN-TEST-1234"
 """
 from colorama import Fore, Style
 from .base_handler import ModeHandler
@@ -36,46 +37,11 @@ class SetHandler(ModeHandler):
         return {'identifier': self.args.identifier.strip()}
 
     def execute_workflow(self, context: dict):
-        from ..utils.persistence.file_utils import list_registered_projects
+        from ..utils.persistence.project_utils import resolve_project_by_identifier
         from ..utils.config_loader import ConfigLoader
 
         identifier = context['identifier']
-        projects = list_registered_projects()
-
-        # Try exact name match (case-insensitive)
-        match = None
-        for proj in projects:
-            if proj.get('name', '').lower() == identifier.lower():
-                match = proj
-                break
-
-        # Try ID prefix match
-        if not match:
-            for proj in projects:
-                pid = proj.get('id', '')
-                if pid == identifier or pid.startswith(identifier):
-                    match = proj
-                    break
-
-        # Try partial name match
-        if not match:
-            candidates = [
-                p for p in projects
-                if identifier.lower() in p.get('name', '').lower()
-            ]
-            if len(candidates) == 1:
-                match = candidates[0]
-            elif len(candidates) > 1:
-                print(f"{Fore.YELLOW}[INFO] Multiple projects match '{identifier}':{Style.RESET_ALL}\n")
-                for idx, c in enumerate(candidates, 1):
-                    print(f"  {idx}. {c.get('name')} (ID: {c.get('id', '')[:8]}…)")
-                print(f"  0. Cancel\n")
-                choice = input(f"{Fore.CYAN}Select project (0-{len(candidates)}): {Style.RESET_ALL}").strip()
-                if choice.isdigit() and 1 <= int(choice) <= len(candidates):
-                    match = candidates[int(choice) - 1]
-                else:
-                    print(f"{Fore.YELLOW}[INFO] Cancelled.{Style.RESET_ALL}")
-                    return False
+        match = resolve_project_by_identifier(identifier)
 
         if not match:
             print(f"{Fore.RED}[ERROR] No project found matching '{identifier}'.{Style.RESET_ALL}")

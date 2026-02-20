@@ -3,23 +3,7 @@ Builder pattern for constructing nmap commands.
 Provides a fluent interface for building complex nmap command lines.
 """
 import shlex
-from enum import Enum
-from typing import Optional, List, Tuple
-
-
-class ScanType(str, Enum):
-    """Nmap scan type identifiers.
-
-    Inherits from ``str`` so that ``ScanType.PING == "ping"`` is ``True``
-    and existing code using plain strings continues to work.
-    """
-    PING = "ping"
-    TOP100 = "top100"
-    TOP1000 = "top1000"
-    HTTP_PORTS = "http_ports"
-    NETSEC_KNOWN = "netsec_known"
-    ALL_PORTS = "all_ports"
-    CUSTOM = "custom"
+from typing import List, Optional, Tuple
 
 
 class NmapCommandBuilder:
@@ -76,7 +60,7 @@ class NmapCommandBuilder:
         elif scan_type == "netsec_known":
             self.cmd.extend([
                 '-p', 
-                '21,22,23,25,53,80,110,111,135,139,143,443,445,993,995,1723,3306,3389,5900,8080', 
+                '21,22,23,25,53,80,110,111,135,139,143,443,445,993,995,1723,3306,3389,5900,7070,8080', 
                 '-sV'
             ])
         elif scan_type == "all_ports":
@@ -163,7 +147,8 @@ class NmapCommandBuilder:
         """
         # Only add user-agent for recon scans with -sV, not discovery scans
         if user_agent and scan_type not in ["ping"]:
-            self.cmd.extend(['--script-args', f'http.useragent={user_agent}'])
+            safe_ua = user_agent.replace('"', '\\"')
+            self.cmd.extend(['--script-args', f"""'http.useragent="{safe_ua}"'"""])
         
         return self
     
@@ -200,5 +185,12 @@ class NmapCommandBuilder:
         if output_file:
             self.cmd.extend(['-oX', output_file])
         
-        cmd_str = shlex.join(self.cmd)
+        # Build display string
+        parts = []
+        for arg in self.cmd:
+            if arg.startswith("'http.useragent="):
+                parts.append(arg)
+            else:
+                parts.append(shlex.quote(arg))
+        cmd_str = ' '.join(parts)
         return self.cmd, cmd_str

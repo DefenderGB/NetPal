@@ -146,6 +146,10 @@ class ContextBuilder:
         
         # Limit to first 3 proofs per service to avoid overwhelming AI
         for proof in service.proofs[:3]:
+            # Skip proofs with no actionable output
+            if not proof.get("output", True):
+                continue
+
             result_file = proof.get("result_file")
             screenshot_file = proof.get("screenshot_file")
             
@@ -205,7 +209,7 @@ class ContextBuilder:
             host: Host object
             service: Service object
             file_path: Path to file being read
-            proof_type: Type of proof (e.g., 'httpx', 'nuclei')
+            proof_type: Type of proof (e.g., 'playwright', 'nuclei')
         """
         if self.progress_callback:
             self.progress_callback('reading_file', {

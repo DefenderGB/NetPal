@@ -18,7 +18,7 @@ def get_go_tool_path(tool_name: str) -> str:
     back to the bare tool name (resolved via ``$PATH``).
 
     Args:
-        tool_name: Name of GO tool (e.g., 'nuclei', 'httpx')
+        tool_name: Name of GO tool (e.g., 'nuclei')
 
     Returns:
         Full path to tool binary if found in GO bin, otherwise tool name
@@ -61,7 +61,7 @@ def check_go_tool_installed(tool_name: str) -> bool:
     installation. Results are cached to avoid repeated subprocess calls.
     
     Args:
-        tool_name: Tool name to check (e.g., 'nuclei', 'httpx')
+        tool_name: Tool name to check (e.g., 'nuclei')
         
     Returns:
         True if tool is available and responds to version check
@@ -90,6 +90,20 @@ def check_go_tool_installed(tool_name: str) -> bool:
     return False
 
 
+def check_nuclei_installed():
+    """Check if nuclei is installed."""
+    return check_go_tool_installed('nuclei')
+
+
+def check_playwright_installed():
+    """Check if Playwright is installed."""
+    try:
+        from playwright.sync_api import sync_playwright  # noqa: F401
+        return True
+    except ImportError:
+        return False
+
+
 def check_tools():
     """Check if required tools are installed.
     
@@ -97,7 +111,6 @@ def check_tools():
         True if all required tools are available
     """
     from ..services.nmap.scanner import NmapScanner
-    from ..services.tool_runner import ToolRunner
     from .display.display_utils import print_tool_status
 
     print(f"\n{Fore.CYAN}Tool Check:{Style.RESET_ALL}")
@@ -111,13 +124,13 @@ def check_tools():
     if not nmap_ok:
         all_required_ok = False
     
-    httpx_ok = ToolRunner.check_httpx_installed()
-    tools_status.append(("httpx", True, httpx_ok))
-    if not httpx_ok:
+    playwright_ok = check_playwright_installed()
+    tools_status.append(("playwright", True, playwright_ok))
+    if not playwright_ok:
         all_required_ok = False
     
     # Check optional tools
-    nuclei_ok = ToolRunner.check_nuclei_installed()
+    nuclei_ok = check_nuclei_installed()
     tools_status.append(("nuclei", False, nuclei_ok))
     
     # Print status

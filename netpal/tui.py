@@ -150,6 +150,48 @@ def _busy_button(app, btn, busy_label: str):
         app.call_from_thread(btn.__setattr__, "label", original)
 
 
+@contextmanager
+def _nmap_progress_stdin():
+    """Redirect stdin to a pipe that sends periodic spaces for nmap progress.
+
+    Textual captures the real stdin, so nmap's interactive progress display
+    needs a fake stdin that periodically pushes a space+newline to trigger
+    ``--stats-every`` output.
+    """
+    import sys as _sys
+    import time as _time
+    import threading as _threading
+
+    read_fd, write_fd = os.pipe()
+    old_stdin = _sys.stdin
+    _sys.stdin = os.fdopen(read_fd, "r")
+    _running = True
+
+    def _auto_progress():
+        writer = os.fdopen(write_fd, "w")
+        try:
+            while _running:
+                _time.sleep(20)
+                if _running:
+                    writer.write(" \n")
+                    writer.flush()
+        except (BrokenPipeError, OSError):
+            pass
+        finally:
+            try:
+                writer.close()
+            except Exception:
+                pass
+
+    t = _threading.Thread(target=_auto_progress, daemon=True)
+    t.start()
+    try:
+        yield
+    finally:
+        _running = False
+        _sys.stdin = old_stdin
+
+
 def _reset_table(container, table_id: str, *columns: str) -> DataTable:
     """Return a cleared, ready-to-populate DataTable."""
     table = container.query_one(f"#{table_id}", DataTable)
@@ -166,18 +208,22 @@ def _reset_table(container, table_id: str, *columns: str) -> DataTable:
 VIEW_PROJECTS = "view-projects"
 VIEW_ASSETS = "view-assets"
 VIEW_RECON = "view-recon"
+VIEW_TOOLS = "view-tools"
 VIEW_HOSTS = "view-hosts"
+VIEW_FINDINGS = "view-findings"
 VIEW_EVIDENCE = "view-evidence"
 VIEW_SETTINGS = "view-settings"
 
-ALL_VIEWS = [VIEW_PROJECTS, VIEW_ASSETS, VIEW_RECON, VIEW_HOSTS, VIEW_EVIDENCE, VIEW_SETTINGS]
+ALL_VIEWS = [VIEW_PROJECTS, VIEW_ASSETS, VIEW_RECON, VIEW_TOOLS, VIEW_HOSTS, VIEW_FINDINGS, VIEW_EVIDENCE, VIEW_SETTINGS]
 
 VIEW_LABELS = {
     VIEW_PROJECTS: "Projects",
     VIEW_ASSETS: "Assets",
     VIEW_RECON: "Recon",
+    VIEW_TOOLS: "Tools",
     VIEW_HOSTS: "Hosts",
-    VIEW_EVIDENCE: "Evidence",
+    VIEW_FINDINGS: "Findings",
+    VIEW_EVIDENCE: "AI Enhance",
     VIEW_SETTINGS: "Settings",
 }
 
@@ -354,9 +400,7 @@ class CreateProjectScreen(ModalScreen):
         self.dismiss(None)
 
     def _create_project(self) -> None:
-        from netpal.models.project import Project
-        from netpal.utils.persistence.file_utils import register_project, list_registered_projects
-        from netpal.utils.persistence.project_persistence import save_project_to_file
+        from netpal.utils.persistence.project_utils import create_project_headless
 
         status = self.query_one("#new-proj-status", Static)
         name = self.query_one("#new-proj-name", Input).value.strip()
@@ -367,38 +411,23 @@ class CreateProjectScreen(ModalScreen):
             status.update("[red]Project name is required.[/]")
             return
 
-        existing = list_registered_projects()
-        for p in existing:
-            if p.get("name", "").lower() == name.lower():
-                status.update(
-                    f"[yellow]A project named '{p['name']}' already exists. "
-                    f"Select it in the table instead.[/]"
-                )
-                return
-
         config = self.app.config or {}
         cloud_sync_widget = self.query_one("#new-proj-cloud-sync", Select)
         cloud_sync = bool(cloud_sync_widget.value) if cloud_sync_widget.value is not Select.BLANK else False
 
-        if not external_id:
-            external_id = config.get("external_id", "")
-
         try:
-            project = Project(name=name, cloud_sync=cloud_sync)
-            if external_id:
-                project.external_id = external_id
-
-            save_project_to_file(project, None)
-            register_project(
-                project_id=project.project_id,
-                project_name=project.name,
-                updated_utc_ts=project.modified_utc_ts,
-                external_id=project.external_id,
-                cloud_sync=project.cloud_sync,
+            project = create_project_headless(
+                name=name,
+                config=config,
+                description=description,
+                external_id=external_id,
+                cloud_sync=cloud_sync,
                 aws_sync=None,
             )
             _set_active_project(name, self.app.config)
             self.dismiss(project)
+        except ValueError as exc:
+            status.update(f"[yellow]{exc}[/]")
         except Exception as exc:
             status.update(f"[red]Error creating project: {exc}[/]")
 
@@ -551,9 +580,7 @@ class CreateAssetScreen(ModalScreen):
         self.dismiss(None)
 
     def _create_asset(self) -> None:
-        from netpal.utils.asset_factory import AssetFactory
-        from netpal.utils.persistence.file_utils import make_path_relative_to_scan_results
-        from netpal.utils.persistence.project_persistence import save_project_to_file
+        from netpal.utils.asset_factory import create_asset_headless
 
         status = self.query_one("#new-asset-status", Static)
         project = self.app.project
@@ -569,8 +596,7 @@ class CreateAssetScreen(ModalScreen):
             if not name or not file_path:
                 status.update("[red]Name and file path are required.[/]")
                 return
-            # Use make_path_relative_to_scan_results for portable storage
-            target_data = {"file": make_path_relative_to_scan_results(file_path)}
+            target_data = {"file": file_path}
         else:
             target = self.query_one("#new-asset-target", Input).value.strip()
             if not name or not target:
@@ -579,13 +605,9 @@ class CreateAssetScreen(ModalScreen):
             target_data = target
 
         try:
-            asset_id = len(project.assets)
-            asset = AssetFactory.create_asset(
-                str(asset_type), name, asset_id, target_data,
-                project_id=project.project_id,
+            asset = create_asset_headless(
+                project, str(asset_type), name, target_data,
             )
-            project.add_asset(asset)
-            save_project_to_file(project, None)
             self.dismiss(asset)
         except Exception as exc:
             status.update(f"[red]Error: {exc}[/]")
@@ -628,12 +650,11 @@ class DeleteAssetScreen(ModalScreen):
         self.dismiss(False)
 
     def _do_delete(self) -> None:
-        from netpal.utils.persistence.project_persistence import save_project_to_file
+        from netpal.utils.asset_factory import delete_asset_headless
 
         status = self.query_one("#delete-asset-status", Static)
         try:
-            self._project.remove_asset(self._asset)
-            save_project_to_file(self._project, None)
+            delete_asset_headless(self._project, self._asset.name)
             self.dismiss(True)
         except Exception as exc:
             status.update(f"[red]Error deleting asset: {exc}[/]")
@@ -698,10 +719,10 @@ class ProjectsView(VerticalScroll):
             table.add_row(
                 marker,
                 p.get("name", ""),
-                p.get("id", "")[:8] + "…",
+                p.get("id", ""),
                 p.get("external_id", "") or "—",
                 "Yes" if p.get("cloud_sync") else "No",
-                key=p.get("name", ""),
+                key=p.get("id", ""),
             )
         # Update detail with active project info after table refresh
         project = self.app.project
@@ -720,7 +741,8 @@ class ProjectsView(VerticalScroll):
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         if event.row_key is None or event.row_key.value is None:
             return
-        name = str(event.row_key.value)
+        row_data = event.data_table.get_row(event.row_key)
+        name = str(row_data[1]) if len(row_data) > 1 else ""
         if not name.strip():
             return
         _set_active_project(name, self.app.config)
@@ -747,9 +769,10 @@ class ProjectsView(VerticalScroll):
             status = self.query_one("#proj-status", Static)
             status.update(
                 f"[green]✔ Project '{project.name}' created and set as active "
-                f"(ID: {project.project_id[:8]}…)[/]"
+                f"(ID: {project.project_id})[/]"
             )
         self.refresh_view()
+        self.app.refresh()
 
     @on(Button.Pressed, "#btn-delete-project")
     def _handle_delete(self, event: Button.Pressed) -> None:
@@ -771,6 +794,7 @@ class ProjectsView(VerticalScroll):
             detail = self.query_one("#proj-detail", Static)
             detail.update("")
         self.refresh_view()
+        self.app.refresh()
 
     @on(Button.Pressed, "#btn-sync-cloud")
     def _handle_sync(self, event: Button.Pressed) -> None:
@@ -791,45 +815,14 @@ class ProjectsView(VerticalScroll):
         with _busy_button(self.app, btn, "Syncing…"):
             self.app.call_from_thread(status.update, "[cyan]Syncing to cloud…[/]")
             try:
-                from netpal.services.aws.sync_engine import AwsSyncService
-                from netpal.utils.aws.aws_utils import create_safe_boto3_session
-                from netpal.utils.persistence.project_persistence import save_project_to_file
-                from netpal.utils.persistence.file_utils import register_project
+                from netpal.utils.persistence.project_persistence import push_project_to_s3
 
-                config = self.app.config
-                aws_profile = config.get("aws_sync_profile", "").strip()
-                aws_account = config.get("aws_sync_account", "").strip()
-                bucket_name = config.get("aws_sync_bucket", f"netpal-{aws_account}")
-
-                # Enable cloud_sync on the project before syncing
-                if not project.cloud_sync:
-                    project.cloud_sync = True
-                    save_project_to_file(project, None)
-                    register_project(
-                        project_id=project.project_id,
-                        project_name=project.name,
-                        updated_utc_ts=project.modified_utc_ts,
-                        external_id=project.external_id,
-                        cloud_sync=True,
-                        aws_sync=None,
-                    )
-
-                session = create_safe_boto3_session(aws_profile)
-                region = session.region_name or "us-west-2"
-
-                aws_sync = AwsSyncService(
-                    profile_name=aws_profile,
-                    region=region,
-                    bucket_name=bucket_name,
-                )
-
-                aws_sync.sync_at_startup(project.name)
+                push_project_to_s3(project, self.app.config)
 
                 self.app.call_from_thread(
                     status.update,
                     f"[green]✔ Project '{project.name}' synced to cloud successfully.[/]",
                 )
-                # Refresh table to show updated cloud_sync status
                 self.app.call_from_thread(self._refresh_table)
             except Exception as exc:
                 self.app.call_from_thread(
@@ -883,9 +876,24 @@ class AssetsView(VerticalScroll):
                 str(len(a.associated_host)),
                 key=a.name,
             )
-        # Keep existing selection text if present, otherwise show None
-        current = str(detail.renderable or "")
-        if "Selected Asset:" not in current:
+        # Restore selection text if an asset was previously selected
+        if self._selected_asset_name:
+            asset = None
+            for a in project.assets:
+                if a.name == self._selected_asset_name:
+                    asset = a
+                    break
+            if asset:
+                detail.update(
+                    f"Selected Asset: [green]{asset.name}[/]  |  "
+                    f"Type: {asset.type}  |  "
+                    f"Targets: {asset.get_identifier()}  |  "
+                    f"Hosts: {len(asset.associated_host)}"
+                )
+            else:
+                self._selected_asset_name = None
+                detail.update("Selected Asset: [dim]None[/]")
+        else:
             detail.update("Selected Asset: [dim]None[/]")
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
@@ -924,6 +932,7 @@ class AssetsView(VerticalScroll):
             # Notify app to re-evaluate nav state
             self.app.project = self.app.project
         self.refresh_view()
+        self.app.refresh()
 
     @on(Button.Pressed, "#btn-delete-asset")
     def _handle_delete(self, event: Button.Pressed) -> None:
@@ -955,6 +964,7 @@ class AssetsView(VerticalScroll):
             # Notify app to re-evaluate nav state
             self.app.project = self.app.project
         self.refresh_view()
+        self.app.refresh()
 
 
 # ------------ RECON VIEW ---------------------------------------------------
@@ -1101,6 +1111,7 @@ class ReconView(VerticalScroll):
         2. Discovered hosts per asset
         3. All assets (full range scan)
         4. Individual discovered host IPs
+        5. Chunk files (for resuming interrupted scans)
         """
         project = self.app.project
         sel = self.query_one("#recon-asset", Select)
@@ -1143,6 +1154,14 @@ class ReconView(VerticalScroll):
             options.append((
                 f"🔹  Host: {' '.join(label_parts)}",
                 f"__HOST__:{h.ip}",
+            ))
+
+        # 5) Chunk files from previous scan runs
+        from netpal.utils.scanning.scan_helpers import list_chunk_files
+        for info in list_chunk_files(project.project_id, project.assets):
+            options.append((
+                f"📄  Chunk: {info['stem']} ({info['ip_count']} hosts)",
+                f"__CHUNK__:{info['asset'].name}:{info['stem']}",
             ))
 
         if options:
@@ -1230,6 +1249,23 @@ class ReconView(VerticalScroll):
             if not asset and project.assets:
                 asset = project.assets[0]
 
+        elif selected.startswith("__CHUNK__:"):
+            # Format: __CHUNK__:{asset_name}:{chunk_stem}
+            parts = selected.split(":", 2)
+            chunk_stem = parts[2]
+            from netpal.utils.scanning.scan_helpers import resolve_chunk_by_name
+            asset, chunk_ips, _ = resolve_chunk_by_name(
+                project.project_id, project.assets, chunk_stem
+            )
+            if asset and chunk_ips:
+                scan_target = ",".join(chunk_ips)
+                target_label = f"chunk {chunk_stem} ({len(chunk_ips)} hosts)"
+            else:
+                self.app.call_from_thread(
+                    status.update, f"[red]Chunk file not found: {chunk_stem}.txt[/]"
+                )
+                return
+
         else:
             # Legacy fallback — plain asset name
             for a in project.assets:
@@ -1265,15 +1301,14 @@ class ReconView(VerticalScroll):
             config = self.app.config
 
             try:
-                import sys as _sys
                 import time as _time
-                import threading as _threading
 
                 from netpal.services.nmap.scanner import NmapScanner
                 from netpal.utils.scanning.scan_helpers import (
                     execute_discovery_scan,
                     execute_recon_scan,
                     run_exploit_tools_on_hosts,
+                    scan_and_run_tools_on_discovered_hosts,
                     send_scan_notification,
                 )
                 from netpal.utils.persistence.project_persistence import (
@@ -1281,7 +1316,7 @@ class ReconView(VerticalScroll):
                     save_findings_to_file,
                 )
                 from netpal.utils.config_loader import ConfigLoader
-                from netpal.services.tool_runner import ToolRunner
+                from netpal.services.tools.tool_orchestrator import ToolOrchestrator as ToolRunner
                 from netpal.services.notification_service import NotificationService
 
                 scanner = NmapScanner(config=config)
@@ -1292,9 +1327,15 @@ class ReconView(VerticalScroll):
                 def output_cb(line):
                     self.app.call_from_thread(log.write, line.rstrip())
 
+                def _save_proj():
+                    save_project_to_file(project, None)
+
+                def _save_find():
+                    save_findings_to_file(project)
+
                 iface_val = self.query_one("#recon-interface", Select).value
-                form_iface = str(iface_val).strip() if iface_val is not Select.BLANK and iface_val else ""
-                interface = form_iface or config.get("network_interface")
+                form_iface = str(iface_val).strip() if isinstance(iface_val, str) and iface_val else ""
+                interface = form_iface or config.get("network_interface") or None
                 form_exclude = self.query_one("#recon-exclude", Input).value.strip()
                 exclude = form_exclude or config.get("exclude")
                 form_excl_ports = self.query_one("#recon-exclude-ports", Input).value.strip()
@@ -1303,106 +1344,79 @@ class ReconView(VerticalScroll):
                 if form_ua:
                     config["user-agent"] = form_ua
 
-                # Redirect sys.stdin to a pipe so we can send spaces to nmap
-                # for periodic progress (Textual captures the real stdin).
-                read_fd, write_fd = os.pipe()
-                old_stdin = _sys.stdin
-                _sys.stdin = os.fdopen(read_fd, "r")
-                _scan_running = True
+                rerun_val = self.query_one("#recon-rerun-autotools", Select).value
+                rerun_autotools = str(rerun_val) if rerun_val is not Select.BLANK and rerun_val else "2"
 
-                def _auto_progress():
-                    writer = os.fdopen(write_fd, "w")
-                    try:
-                        while _scan_running:
-                            _time.sleep(20)
-                            if _scan_running:
-                                writer.write(" \n")
-                                writer.flush()
-                    except (BrokenPipeError, OSError):
-                        pass
-                    finally:
-                        try:
-                            writer.close()
-                        except Exception:
-                            pass
+                # Resolve explicit IP list for discovered-host targets
+                all_ips = None
+                if "," in (scan_target or ""):
+                    all_ips = [ip.strip() for ip in scan_target.split(",") if ip.strip()]
 
-                progress_t = _threading.Thread(target=_auto_progress, daemon=True)
-                progress_t.start()
-
-                try:
+                with _nmap_progress_stdin():
                     if str(scan_type) == "nmap-discovery":
                         hosts, error, _ = execute_discovery_scan(
                             scanner, asset, project, config, speed=speed, callback=output_cb
                         )
-                    else:
-                        if "," in (scan_target or ""):
-                            all_ips = [ip.strip() for ip in scan_target.split(",") if ip.strip()]
-                            hosts, error = scanner.scan_list(
-                                all_ips,
-                                scan_type=str(scan_type),
-                                project_name=project.project_id,
-                                asset_name=asset.get_identifier(),
-                                interface=interface,
-                                exclude=exclude,
-                                exclude_ports=exclude_ports,
-                                callback=output_cb,
-                                speed=speed,
-                                skip_discovery=skip_discovery,
-                                verbose=False,
-                            )
-                        else:
-                            hosts, error, _ = execute_recon_scan(
-                                scanner, asset, project, scan_target,
-                                interface, str(scan_type), custom_opts,
-                                speed, skip_discovery, False, exclude, exclude_ports, output_cb,
-                            )
-                finally:
-                    _scan_running = False
-                    _sys.stdin = old_stdin
-
-                if error:
-                    self.app.call_from_thread(
-                        log.write, f"[bold red]Error: {error}[/]"
-                    )
-                elif hosts:
-                    for h in hosts:
-                        project.add_host(h, asset.asset_id)
-                    save_project_to_file(project, None)
-                    self.app.call_from_thread(
-                        log.write,
-                        f"\n[bold green]✔ Scan complete — {len(hosts)} host(s) found[/]",
-                    )
-
-                    # Run auto-tools on hosts with services (recon scans only)
-                    hosts_with_services = [h for h in hosts if h.services]
-                    if run_tools and hosts_with_services and str(scan_type) != "nmap-discovery":
-                        self.app.call_from_thread(
-                            log.write,
-                            "\n[bold cyan]Running exploit tools on discovered services…[/]",
-                        )
+                    elif all_ips:
+                        # Discovered-hosts path — delegates chunking + tools
+                        # to the shared helper used by the CLI.
                         exploit_tools = ConfigLoader.load_exploit_tools()
                         tool_runner = ToolRunner(project.project_id, config)
 
-                        def _save_proj():
-                            save_project_to_file(project, None)
-
-                        def _save_find():
-                            save_findings_to_file(project)
-
-                        rerun_val = self.query_one("#recon-rerun-autotools", Select).value
-                        rerun_autotools = str(rerun_val) if rerun_val is not Select.BLANK and rerun_val else "2"
-
-                        run_exploit_tools_on_hosts(
-                            tool_runner, hosts_with_services, asset,
-                            exploit_tools, project, output_cb,
+                        hosts = scan_and_run_tools_on_discovered_hosts(
+                            scanner, tool_runner, all_ips,
+                            asset, project, str(scan_type), interface,
+                            exclude, exclude_ports, speed, skip_discovery,
+                            False, exploit_tools, output_cb,
                             _save_proj, _save_find,
                             rerun_autotools=rerun_autotools,
+                            custom_ports=custom_opts,
                         )
-                        self.app.call_from_thread(
-                            log.write,
-                            "[bold green]✔ Auto-tools complete[/]",
+                        error = None  # errors handled inside helper
+                    else:
+                        hosts, error, _ = execute_recon_scan(
+                            scanner, asset, project, scan_target,
+                            interface, str(scan_type), custom_opts,
+                            speed, skip_discovery, False, exclude, exclude_ports, output_cb,
                         )
 
+                # ── Post-scan handling for non-discovered targets ──────
+                if not all_ips:
+                    if error:
+                        self.app.call_from_thread(
+                            log.write, f"[bold red]Error: {error}[/]"
+                        )
+                    elif hosts:
+                        for h in hosts:
+                            project.add_host(h, asset.asset_id)
+                        _save_proj()
+                        self.app.call_from_thread(
+                            log.write,
+                            f"\n[bold green]✔ Scan complete — {len(hosts)} host(s) found[/]",
+                        )
+
+                        # Run auto-tools on hosts with services (recon scans only)
+                        hosts_with_services = [h for h in hosts if h.services]
+                        if run_tools and hosts_with_services and str(scan_type) != "nmap-discovery":
+                            self.app.call_from_thread(
+                                log.write,
+                                "\n[bold cyan]Running exploit tools on discovered services…[/]",
+                            )
+                            exploit_tools = ConfigLoader.load_exploit_tools()
+                            tool_runner = ToolRunner(project.project_id, config)
+
+                            run_exploit_tools_on_hosts(
+                                tool_runner, hosts_with_services, asset,
+                                exploit_tools, project, output_cb,
+                                _save_proj, _save_find,
+                                rerun_autotools=rerun_autotools,
+                            )
+                            self.app.call_from_thread(
+                                log.write,
+                                "[bold green]✔ Auto-tools complete[/]",
+                            )
+
+                if hosts:
                     # Delegate notification to scan_helpers.send_scan_notification()
                     end_time = _time.time()
                     duration_seconds = int(end_time - start_time)
@@ -1444,6 +1458,339 @@ class ReconView(VerticalScroll):
         # Refresh the targets dropdown so new hosts/assets appear
         self._populate_targets()
         # Re-assign to trigger reactive watcher
+        self.app.project = self.app.project
+
+
+# ------------ TOOLS VIEW ---------------------------------------------------
+
+class ToolsView(VerticalScroll):
+    """Exploit tool execution — select target, tool, and optional port/service filter."""
+
+    DEFAULT_CLASSES = "compact-form"
+
+    def compose(self) -> ComposeResult:
+        yield Static("[bold]Exploit Tools[/]", classes="section-title")
+        yield Static(
+            "Run exploit tools against discovered hosts. Select a target, pick a tool, "
+            "and optionally filter by port or service name.",
+            classes="info-text",
+        )
+
+        with Horizontal():
+            with Vertical():
+                yield Label("Target")
+                yield Select([], id="tools-target", allow_blank=True)
+            with Vertical():
+                yield Label("Tool")
+                yield Select([], id="tools-tool-select", allow_blank=True)
+
+        with Horizontal():
+            with Vertical():
+                yield Label("Port / Service filter (optional)")
+                yield Input(
+                    id="tools-port-service",
+                    placeholder="e.g. 80 or ssh (leave blank to run against all services)",
+                )
+            with Vertical():
+                yield Label("Re-run auto-tools")
+                yield Select(
+                    [
+                        ("Always", "Y"), ("Never", "N"),
+                        ("2 days (default)", "2"), ("7 days", "7"),
+                        ("14 days", "14"), ("30 days", "30"),
+                    ],
+                    id="tools-rerun",
+                    value="2",
+                )
+
+        with Horizontal():
+            yield Button("▶ Run Tool", id="btn-run-tool", variant="success")
+
+        yield Static("", id="tools-status")
+        yield RichLog(id="tools-log", highlight=True, markup=True, min_width=80)
+
+    def on_mount(self) -> None:
+        self.refresh_view()
+
+    def refresh_view(self) -> None:
+        self._populate_targets()
+        self._populate_tools()
+
+    # ── Dropdown population ────────────────────────────────────────────
+
+    def _populate_targets(self) -> None:
+        """Build target dropdown: All Discovered, per-asset discovered, individual hosts."""
+        project = self.app.project
+        sel = self.query_one("#tools-target", Select)
+        if not project:
+            sel.set_options([])
+            return
+
+        options: list[tuple[str, str]] = []
+
+        # 1) All discovered hosts
+        all_hosts = project.hosts
+        if all_hosts:
+            svc_count = sum(len(h.services) for h in all_hosts)
+            options.append((
+                f"🖥  All Discovered ({len(all_hosts)} hosts, {svc_count} svc)",
+                "all_discovered",
+            ))
+
+        # 2) Per-asset discovered
+        for a in project.assets:
+            asset_hosts = [h for h in project.hosts if a.asset_id in h.assets]
+            if asset_hosts:
+                svc_count = sum(len(h.services) for h in asset_hosts)
+                options.append((
+                    f"📦  {a.name} ({len(asset_hosts)} hosts, {svc_count} svc)",
+                    f"{a.name}_discovered",
+                ))
+
+        # 3) Individual hosts
+        for h in project.hosts:
+            svc_list = ", ".join(
+                f"{s.port}/{s.service_name or '?'}" for s in h.services
+            )
+            label = f"🔹  {h.ip}"
+            if h.hostname:
+                label += f" ({h.hostname})"
+            label += f" — {svc_list}" if svc_list else " — no services"
+            options.append((label, f"host:{h.ip}"))
+
+        if options:
+            sel.set_options(options)
+        else:
+            sel.set_options([])
+
+    def _populate_tools(self) -> None:
+        """Populate tool dropdown from exploit_tools.json + Playwright."""
+        from netpal.utils.config_loader import ConfigLoader
+
+        sel = self.query_one("#tools-tool-select", Select)
+        exploit_tools = ConfigLoader.load_exploit_tools()
+
+        options: list[tuple[str, str]] = []
+
+        # "All" runs every matching tool
+        options.append(("All Tools", "__ALL__"))
+
+        # Playwright (built-in)
+        options.append((
+            "Playwright — HTTP/HTTPS capture (web services)",
+            "__PLAYWRIGHT__",
+        ))
+
+        for tool in exploit_tools:
+            name = tool.get("tool_name", "Unknown")
+            ports = tool.get("port", [])
+            ports_str = ", ".join(str(p) for p in ports)
+            label = f"{name} (Port {ports_str})" if ports_str else name
+            options.append((label, name))
+
+        sel.set_options(options)
+
+    # ── Run button ────────────────────────────────────────────────────
+
+    @on(Button.Pressed, "#btn-run-tool")
+    def _handle_run(self, event: Button.Pressed) -> None:
+        self._start_tools()
+
+    @work(thread=True, exclusive=True, group="tools_run")
+    def _start_tools(self) -> None:
+        """Run the selected tool against the selected target."""
+        project = self.app.project
+        log = self.query_one("#tools-log", RichLog)
+        status = self.query_one("#tools-status", Static)
+        btn = self.query_one("#btn-run-tool", Button)
+
+        if not project:
+            self.app.call_from_thread(status.update, "[red]No active project.[/]")
+            return
+
+        target_val = self.query_one("#tools-target", Select).value
+        if not target_val or target_val is Select.BLANK:
+            self.app.call_from_thread(status.update, "[red]Select a target first.[/]")
+            return
+
+        tool_val = self.query_one("#tools-tool-select", Select).value
+        if not tool_val or tool_val is Select.BLANK:
+            self.app.call_from_thread(status.update, "[red]Select a tool first.[/]")
+            return
+
+        target_val = str(target_val)
+        tool_val = str(tool_val)
+
+        port_service_raw = self.query_one("#tools-port-service", Input).value.strip()
+        rerun_val = self.query_one("#tools-rerun", Select).value
+        rerun_autotools = str(rerun_val) if rerun_val is not Select.BLANK and rerun_val else "2"
+
+        # ── Resolve hosts ──────────────────────────────────────────
+        hosts = []
+        asset = None
+
+        if target_val == "all_discovered":
+            hosts = list(project.hosts)
+            asset = project.assets[0] if project.assets else None
+        elif target_val.endswith("_discovered"):
+            asset_name = target_val.rsplit("_discovered", 1)[0]
+            for a in project.assets:
+                if a.name == asset_name:
+                    asset = a
+                    break
+            if asset:
+                hosts = [h for h in project.hosts if asset.asset_id in h.assets]
+        elif target_val.startswith("host:"):
+            host_ip = target_val.split(":", 1)[1]
+            for h in project.hosts:
+                if h.ip == host_ip:
+                    hosts = [h]
+                    # Find asset for this host
+                    for a in project.assets:
+                        if a.asset_id in h.assets:
+                            asset = a
+                            break
+                    break
+
+        if not hosts:
+            self.app.call_from_thread(status.update, "[red]No hosts found for target.[/]")
+            return
+        if not asset and project.assets:
+            asset = project.assets[0]
+        if not asset:
+            self.app.call_from_thread(status.update, "[red]No asset available for output.[/]")
+            return
+
+        # ── Filter by port or service ──────────────────────────────
+        port_filter = None
+        service_filter = None
+        if port_service_raw:
+            if port_service_raw.isdigit():
+                port_filter = int(port_service_raw)
+            else:
+                service_filter = port_service_raw.lower()
+
+        # ── Resolve tool selection ─────────────────────────────────
+        from netpal.utils.config_loader import ConfigLoader
+
+        exploit_tools = ConfigLoader.load_exploit_tools()
+        playwright_only = False
+
+        if tool_val == "__PLAYWRIGHT__":
+            playwright_only = True
+        elif tool_val != "__ALL__":
+            # Filter to the specific tool
+            matched = [t for t in exploit_tools if t.get("tool_name", "") == tool_val]
+            if not matched:
+                self.app.call_from_thread(
+                    status.update,
+                    f"[red]Tool '{tool_val}' not found.[/]",
+                )
+                return
+            exploit_tools = matched
+
+        with _busy_button(self.app, btn, "Running…"):
+            self.app.call_from_thread(log.clear)
+            tool_label = "Playwright" if playwright_only else (
+                tool_val if tool_val != "__ALL__" else "All tools"
+            )
+            self.app.call_from_thread(
+                log.write,
+                f"[bold yellow]Running {tool_label} on {len(hosts)} host(s)…[/]",
+            )
+
+            try:
+                from netpal.services.tools.tool_orchestrator import ToolOrchestrator
+                from netpal.utils.scanning.scan_helpers import run_exploit_tools_on_hosts
+                from netpal.utils.persistence.project_persistence import (
+                    save_project_to_file, save_findings_to_file,
+                )
+                from netpal.models.host import Host
+
+                config = self.app.config
+                tool_runner = ToolOrchestrator(project.project_id, config)
+
+                def output_cb(line):
+                    self.app.call_from_thread(log.write, line.rstrip())
+
+                def _save_proj():
+                    save_project_to_file(project, None)
+
+                def _save_find():
+                    save_findings_to_file(project)
+
+                # Build the host list, potentially narrowed by port/service
+                run_hosts = []
+                for h in hosts:
+                    if not h.services:
+                        continue
+
+                    # Narrow services if filter is active
+                    matched_services = h.services
+                    if port_filter is not None:
+                        matched_services = [s for s in h.services if s.port == port_filter]
+                    elif service_filter:
+                        matched_services = [
+                            s for s in h.services
+                            if service_filter in (s.service_name or "").lower()
+                        ]
+
+                    if not matched_services:
+                        continue
+
+                    # If narrowing, create a proxy host with only targeted services
+                    if port_filter is not None or service_filter:
+                        proxy = Host(
+                            ip=h.ip, hostname=h.hostname,
+                            os=h.os, host_id=h.host_id,
+                        )
+                        proxy.services = matched_services
+                        proxy.findings = h.findings
+                        proxy.assets = h.assets
+                        run_hosts.append(proxy)
+                    else:
+                        run_hosts.append(h)
+
+                if not run_hosts:
+                    filter_desc = ""
+                    if port_filter is not None:
+                        filter_desc = f" with port {port_filter}"
+                    elif service_filter:
+                        filter_desc = f" with service '{service_filter}'"
+                    self.app.call_from_thread(
+                        log.write,
+                        f"[yellow]No hosts with matching services{filter_desc}.[/]",
+                    )
+                    return
+
+                total_svc = sum(len(h.services) for h in run_hosts)
+                self.app.call_from_thread(
+                    log.write,
+                    f"[cyan]Targeting {len(run_hosts)} host(s), "
+                    f"{total_svc} service(s)[/]\n",
+                )
+
+                run_exploit_tools_on_hosts(
+                    tool_runner, run_hosts, asset, exploit_tools,
+                    project, output_cb, _save_proj, _save_find,
+                    rerun_autotools=rerun_autotools,
+                    playwright_only=playwright_only,
+                )
+
+                self.app.call_from_thread(
+                    log.write,
+                    "\n[bold green]✔ Tool execution complete![/]",
+                )
+                # Trigger state refresh
+                self.app.call_from_thread(self._post_run_refresh)
+
+            except Exception as exc:
+                self.app.call_from_thread(
+                    log.write, f"[bold red]Error: {exc}[/]"
+                )
+
+    def _post_run_refresh(self) -> None:
+        self._populate_targets()
         self.app.project = self.app.project
 
 
@@ -1563,30 +1910,119 @@ class HostsView(VerticalScroll):
         panel.update("\n".join(lines))
 
 
-# ------------ EVIDENCE VIEW ------------------------------------------------
+# ------------ FINDINGS VIEW ------------------------------------------------
 
-class EvidenceView(VerticalScroll):
-    """Findings display + AI Review / AI Enhance actions."""
+class FindingsView(VerticalScroll):
+    """Security findings list with click-to-expand detail (mirrors HostsView)."""
 
     def compose(self) -> ComposeResult:
-        yield Static("[bold]Evidence — Security Findings[/]", classes="section-title")
+        yield Static("[bold]Security Findings[/]", classes="section-title")
         yield Static(
-            "View findings and run AI analysis on scan evidence.",
+            "Click a finding row to inspect its details below.",
             classes="info-text",
         )
         yield DataTable(id="findings-table")
+        yield Static("", id="finding-detail-panel")
+
+    def on_mount(self) -> None:
+        self.refresh_view()
+
+    def refresh_view(self) -> None:
+        self._refresh_findings_table()
+
+    def _refresh_findings_table(self) -> None:
+        table = _reset_table(
+            self, "findings-table",
+            "Severity", "Name", "Host", "Port", "CWE",
+        )
+        project = self.app.project
+        if not project:
+            return
+        for idx, f in enumerate(project.findings):
+            host = project.get_host(f.host_id) if f.host_id else None
+            host_ip = host.ip if host else "—"
+            table.add_row(
+                f.severity or "—",
+                (f.name or "—")[:60],
+                host_ip,
+                str(f.port) if f.port else "—",
+                f.cwe or "—",
+                key=str(idx),
+            )
+
+    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
+        if event.row_key is None or event.row_key.value is None:
+            return
+        try:
+            idx = int(event.row_key.value)
+        except (ValueError, TypeError):
+            return
+        self._show_finding_detail(idx)
+
+    def _show_finding_detail(self, idx: int) -> None:
+        """Build a rich-text detail panel for the selected finding."""
+        project = self.app.project
+        if not project or idx >= len(project.findings):
+            return
+        f = project.findings[idx]
+
+        host = project.get_host(f.host_id) if f.host_id else None
+        host_ip = host.ip if host else "—"
+
+        panel = self.query_one("#finding-detail-panel", Static)
+        lines: list[str] = []
+
+        sev_color = _severity_color(f.severity or "Info")
+        lines.append(
+            f"\n[bold cyan]━━━ Finding: [{sev_color}]{f.severity}[/] — {f.name} ━━━[/]"
+        )
+        lines.append(f"  Host: {host_ip}  |  Port: {f.port or '—'}  |  CWE: {f.cwe or '—'}")
+        if getattr(f, "cvss_score", None):
+            lines.append(f"  CVSS: {f.cvss_score}")
+
+        if getattr(f, "description", None):
+            lines.append(f"\n  [bold]Description[/]")
+            lines.append(f"  {f.description}")
+
+        if getattr(f, "impact", None):
+            lines.append(f"\n  [bold]Impact[/]")
+            lines.append(f"  {f.impact}")
+
+        if getattr(f, "remediation", None):
+            lines.append(f"\n  [bold]Remediation[/]")
+            lines.append(f"  {f.remediation}")
+
+        if getattr(f, "evidence", None):
+            lines.append(f"\n  [bold]Evidence[/]")
+            lines.append(f"  {f.evidence}")
+
+        panel.update("\n".join(lines))
+
+
+# ------------ AI ENHANCE VIEW (formerly Evidence) --------------------------
+
+class EvidenceView(VerticalScroll):
+    """AI Enhance — run AI reviewer and AI QA on findings."""
+
+    def compose(self) -> ComposeResult:
+        yield Static("[bold]AI Enhance[/]", classes="section-title")
+        yield Static(
+            "Use AI to generate and improve security findings from scan evidence.",
+            classes="info-text",
+        )
         yield Static("", id="evidence-status")
 
-        yield Static("\n[bold]AI Actions[/]", classes="section-title")
         with Horizontal():
             yield Label("Batch size")
             yield Input(id="ai-batch", placeholder="5", value="5")
         with Horizontal():
             yield Button(
-                "▶ Run AI Review", id="btn-ai-review", variant="success"
+                "🤖 Run AI Reviewer to create findings",
+                id="btn-ai-review", variant="success",
             )
             yield Button(
-                "▶ Run AI Enhance", id="btn-ai-enhance", variant="warning"
+                "✨ Run AI QA improvements on open findings",
+                id="btn-ai-enhance", variant="warning",
             )
         yield RichLog(
             id="evidence-log", highlight=True, markup=True, min_width=80
@@ -1596,23 +2032,7 @@ class EvidenceView(VerticalScroll):
         self.refresh_view()
 
     def refresh_view(self) -> None:
-        self._refresh_findings()
-
-    def _refresh_findings(self) -> None:
-        table = _reset_table(self, "findings-table", "Severity", "Name", "Host", "Port", "CWE")
-        project = self.app.project
-        if not project:
-            return
-        for f in project.findings:
-            host = project.get_host(f.host_id) if f.host_id else None
-            host_ip = host.ip if host else "—"
-            table.add_row(
-                f.severity or "—",
-                (f.name or "—")[:60],
-                host_ip,
-                str(f.port) if f.port else "—",
-                f.cwe or "—",
-            )
+        pass  # No table to refresh — status log is persistent
 
     @on(Button.Pressed, "#btn-ai-review")
     def _handle_review(self, event: Button.Pressed) -> None:
@@ -1625,7 +2045,7 @@ class EvidenceView(VerticalScroll):
     # -- AI Review -----------------------------------------------------------
     @work(thread=True, exclusive=True, group="ai_review")
     def _run_review(self) -> None:
-        """Run AI-powered finding analysis via run_ai_reporting_phase()."""
+        """Run AI-powered finding analysis with detailed progress logging."""
         project = self.app.project
         log = self.query_one("#evidence-log", RichLog)
         status = self.query_one("#evidence-status", Static)
@@ -1652,15 +2072,89 @@ class EvidenceView(VerticalScroll):
             config = self.app.config
             batch_str = self.query_one("#ai-batch", Input).value.strip()
             batch_size = int(batch_str) if batch_str.isdigit() else 5
-            # Temporarily set batch_size in config so run_ai_reporting_phase picks it up
             original_batch = config.get("ai_batch_size")
             config["ai_batch_size"] = batch_size
 
             try:
-                from netpal.utils.ai_helpers import run_ai_reporting_phase
+                from netpal.services.ai.analyzer import AIAnalyzer
+                from netpal.utils.ai_helpers import run_ai_analysis
                 from netpal.utils.persistence.project_persistence import ProjectPersistence
 
-                ai_findings = run_ai_reporting_phase(project, config)
+                # Initialise AI analyzer (same as run_ai_reporting_phase)
+                ai_analyzer = AIAnalyzer(config)
+
+                if not ai_analyzer.is_configured():
+                    self.app.call_from_thread(
+                        log.write,
+                        "[red]AI analyzer not configured. Check Settings.[/]",
+                    )
+                    return
+
+                # Display AI provider info in TUI log
+                ai_type = ai_analyzer.ai_type
+                provider_names = {
+                    "aws": "AWS Bedrock", "anthropic": "Anthropic",
+                    "openai": "OpenAI", "ollama": "Ollama",
+                    "azure": "Azure OpenAI", "gemini": "Google Gemini",
+                }
+                provider_display = provider_names.get(ai_type, ai_type.upper())
+                self.app.call_from_thread(
+                    log.write,
+                    f"[green]AI Provider: {provider_display}[/]",
+                )
+                if hasattr(ai_analyzer, "provider") and ai_analyzer.provider:
+                    model_name = getattr(ai_analyzer.provider, "model_name", None)
+                    if model_name:
+                        self.app.call_from_thread(
+                            log.write, f"[green]Model: {model_name}[/]"
+                        )
+
+                self.app.call_from_thread(
+                    log.write,
+                    f"[cyan]Analyzing {len(hosts_with_services)} host(s) "
+                    f"with AI (reading proof files)…[/]\n",
+                )
+
+                # Progress callback that mirrors default_ai_progress_callback
+                # but writes to the TUI RichLog instead of stdout.
+                def _tui_progress(event_type, data):
+                    if event_type == "batch_start":
+                        hosts = ", ".join(data["host_ips"])
+                        self.app.call_from_thread(
+                            log.write,
+                            f"[cyan][AI Batch {data['batch_num']}/{data['total_batches']}][/] "
+                            f"Analyzing {data['hosts_in_batch']} host(s): "
+                            f"[yellow]{hosts}[/]",
+                        )
+                        self.app.call_from_thread(
+                            log.write,
+                            f"  → Services: {data['total_services']}",
+                        )
+                    elif event_type == "reading_file":
+                        filename = os.path.basename(data["file"])
+                        self.app.call_from_thread(
+                            log.write,
+                            f"  [dim]  Reading {data['type']}: {filename} "
+                            f"({data['host_ip']}:{data['port']})[/]",
+                        )
+                    elif event_type == "batch_complete":
+                        count = data["findings_count"]
+                        if count > 0:
+                            self.app.call_from_thread(
+                                log.write,
+                                f"  [green]✓ Generated {count} finding(s)[/]\n",
+                            )
+                        else:
+                            self.app.call_from_thread(
+                                log.write,
+                                f"  [yellow]✓ No findings identified[/]\n",
+                            )
+
+                # Run AI analysis with the TUI progress callback
+                ai_findings = run_ai_analysis(
+                    ai_analyzer, project, config,
+                    progress_callback=_tui_progress,
+                )
 
                 if ai_findings:
                     for f in ai_findings:
@@ -1677,7 +2171,6 @@ class EvidenceView(VerticalScroll):
                             log.write,
                             f"  [{_severity_color(f.severity)}]{f.severity}[/] — {f.name}",
                         )
-                    self.app.call_from_thread(self._refresh_findings)
                 else:
                     self.app.call_from_thread(
                         log.write, "[yellow]No findings generated.[/]"
@@ -1688,7 +2181,6 @@ class EvidenceView(VerticalScroll):
                     log.write, f"[bold red]Error: {exc}[/]"
                 )
             finally:
-                # Restore original batch size
                 if original_batch is not None:
                     config["ai_batch_size"] = original_batch
                 elif "ai_batch_size" in config:
@@ -1697,7 +2189,7 @@ class EvidenceView(VerticalScroll):
     # -- AI Enhance ----------------------------------------------------------
     @work(thread=True, exclusive=True, group="ai_enhance")
     def _run_enhance(self) -> None:
-        """Enhance existing findings via run_ai_enhancement_phase()."""
+        """Enhance existing findings — delegates to run_ai_enhancement()."""
         project = self.app.project
         log = self.query_one("#evidence-log", RichLog)
         status = self.query_one("#evidence-status", Static)
@@ -1709,42 +2201,86 @@ class EvidenceView(VerticalScroll):
         if not project.findings:
             self.app.call_from_thread(
                 status.update,
-                "[red]No findings to enhance. Run AI Review first.[/]",
+                "[red]No findings to enhance. Run AI Reviewer first.[/]",
             )
             return
 
         with _busy_button(self.app, btn, "Enhancing…"):
             self.app.call_from_thread(log.clear)
             self.app.call_from_thread(
-                log.write, "[bold yellow]Starting AI enhancement…[/]"
+                log.write, "[bold yellow]Starting AI QA enhancement…[/]"
             )
 
-            config = self.app.config
-
             try:
-                from netpal.utils.ai_helpers import run_ai_enhancement_phase
+                from netpal.services.ai.analyzer import AIAnalyzer
+                from netpal.utils.ai_helpers import run_ai_enhancement
                 from netpal.utils.persistence.project_persistence import ProjectPersistence
 
-                success = run_ai_enhancement_phase(project, config)
+                config = self.app.config
+                ai_analyzer = AIAnalyzer(config)
 
-                if success:
-                    ProjectPersistence.save_and_sync(
-                        project, None, save_findings=True
-                    )
+                if not ai_analyzer.is_configured():
                     self.app.call_from_thread(
                         log.write,
-                        f"[bold green]✔ Enhanced {len(project.findings)} finding(s)[/]",
+                        "[red]AI analyzer not configured. Check Settings.[/]",
                     )
-                    for f in project.findings:
+                    return
+
+                if not ai_analyzer.enhancer:
+                    self.app.call_from_thread(
+                        log.write,
+                        "[red]AI enhancer not available — check AI configuration.[/]",
+                    )
+                    return
+
+                # Display AI provider info
+                self.app.call_from_thread(
+                    log.write,
+                    f"[green]Enhancing {len(project.findings)} finding(s) "
+                    f"with detailed AI analysis…[/]\n",
+                )
+
+                # TUI progress callback
+                def _tui_enhance_progress(event_type, data):
+                    if event_type == "finding_start":
                         self.app.call_from_thread(
                             log.write,
-                            f"  [{_severity_color(f.severity)}]{f.severity}[/] — {f.name}",
+                            f"[cyan][{data['index']}/{data['total']}] "
+                            f"Enhancing: {data['name']}[/]",
                         )
-                    self.app.call_from_thread(self._refresh_findings)
-                else:
-                    self.app.call_from_thread(
-                        log.write, "[yellow]Enhancement returned no results.[/]"
-                    )
+                    elif event_type == "finding_complete":
+                        self.app.call_from_thread(
+                            log.write, "  [green]✓ Enhanced all fields[/]",
+                        )
+                    elif event_type == "finding_error":
+                        self.app.call_from_thread(
+                            log.write,
+                            f"  [red]✗ Enhancement failed: {data['error']}[/]",
+                        )
+                    elif event_type == "summary":
+                        self.app.call_from_thread(
+                            log.write,
+                            f"\n[bold green]✔ All {data['total']} finding(s) "
+                            f"enhanced successfully[/]",
+                        )
+                        self.app.call_from_thread(
+                            log.write,
+                            "\n[cyan]Enhanced findings by severity:[/]",
+                        )
+                        for sev, count in data["severity_counts"].items():
+                            self.app.call_from_thread(
+                                log.write,
+                                f"  [{_severity_color(sev)}]{sev}: {count}[/]",
+                            )
+
+                run_ai_enhancement(
+                    ai_analyzer, project,
+                    progress_callback=_tui_enhance_progress,
+                )
+
+                ProjectPersistence.save_and_sync(
+                    project, None, save_findings=True
+                )
 
             except Exception as exc:
                 self.app.call_from_thread(
@@ -1830,10 +2366,12 @@ class NetPalApp(App):
         Binding("1", "goto('view-projects')", "Projects", show=True),
         Binding("2", "goto('view-assets')", "Assets", show=True),
         Binding("3", "goto('view-recon')", "Recon", show=True),
-        Binding("4", "goto('view-hosts')", "Hosts", show=True),
-        Binding("5", "goto('view-evidence')", "Evidence", show=True),
-        Binding("6", "goto('view-settings')", "Settings", show=True),
-        Binding("q", "quit", "Quit (or ctrl+q)", show=True),
+        Binding("4", "goto('view-tools')", "Tools", show=True),
+        Binding("5", "goto('view-hosts')", "Hosts", show=True),
+        Binding("6", "goto('view-findings')", "Findings", show=True),
+        Binding("7", "goto('view-evidence')", "AI Enhance", show=True),
+        Binding("8", "goto('view-settings')", "Settings", show=True),
+        Binding("q", "quit", "Quit", show=True),
     ]
 
     # Reactive state — assigning triggers watch_ methods
@@ -1865,8 +2403,12 @@ class NetPalApp(App):
                 yield AssetsView()
             with VerticalScroll(id=VIEW_RECON, classes="view-container"):
                 yield ReconView()
+            with VerticalScroll(id=VIEW_TOOLS, classes="view-container"):
+                yield ToolsView()
             with VerticalScroll(id=VIEW_HOSTS, classes="view-container"):
                 yield HostsView()
+            with VerticalScroll(id=VIEW_FINDINGS, classes="view-container"):
+                yield FindingsView()
             with VerticalScroll(id=VIEW_EVIDENCE, classes="view-container"):
                 yield EvidenceView()
             with VerticalScroll(id=VIEW_SETTINGS, classes="view-container"):
@@ -1918,7 +2460,10 @@ class NetPalApp(App):
                         svc for h in p.hosts for svc in h.services
                     )
                     if has_services:
+                        allowed.add(VIEW_TOOLS)
                         allowed.add(VIEW_EVIDENCE)
+                    if p.findings:
+                        allowed.add(VIEW_FINDINGS)
         return allowed
 
     def _update_nav_state(self) -> None:
@@ -1967,7 +2512,9 @@ class NetPalApp(App):
             VIEW_PROJECTS: ProjectsView,
             VIEW_ASSETS: AssetsView,
             VIEW_RECON: ReconView,
+            VIEW_TOOLS: ToolsView,
             VIEW_HOSTS: HostsView,
+            VIEW_FINDINGS: FindingsView,
             VIEW_EVIDENCE: EvidenceView,
             VIEW_SETTINGS: SettingsView,
         }

@@ -14,7 +14,7 @@ NetPal is a CLI network pentest automation tool and AI copilot for network penet
 - Python 3.12
 - [**uv**](https://docs.astral.sh/uv/) — Python package manager (installed automatically by `install.sh`)
 - **nmap** — network discovery and port scanning (sudo required for SYN scans)
-- **httpx** — ProjectDiscovery HTTP toolkit for screenshots and responses
+- **playwright** — headless Chromium browser for HTTP response capture and screenshots (installed as a Python dependency)
 - **nuclei** — vulnerability scanning with templates
 
 ## Installation
@@ -33,7 +33,7 @@ netpal setup
 bash uninstall.sh
 ```
 
-The uninstaller removes the `.venv/` environment, sudoers rules, and optionally cleans up external tools (nmap, httpx, nuclei, Go, uv). All optional prompts default to No.
+The uninstaller removes the `.venv/` environment, sudoers rules, and optionally cleans up external tools (nmap, nuclei, Go, uv). All optional prompts default to No.
 
 ## Usage
 
@@ -46,20 +46,19 @@ An alternative interactive terminal UI is also available via `netpal interactive
 The TUI can also be served as a web application in the browser via `netpal website` (uses `textual-serve` on port 7123).
 
 ```
-usage: netpal [-h] [--sync] [--no-sync] [--project PROJECT] [--verbose]
-              [--config CONFIG]
-              {init,list,set,assets,recon,auto,ai-review,ai-report-enhance,setup,findings,hosts,pull,delete,interactive,website} ...
+usage: netpal [-h] [-s] [-ns] [-p PROJECT] [-v] [-c CONFIG] {init,list,set,rename,assets,recon,ai-review,ai-report-enhance,setup,findings,hosts,pull,delete,interactive,website,auto} ...
 
 NetPal — Automated Network Penetration Testing CLI Tool
 
 positional arguments:
-  {init,list,set,assets,recon,auto,ai-review,ai-report-enhance,setup,findings,hosts,pull,delete,interactive,website}
+  {init,list,set,rename,assets,recon,ai-review,ai-report-enhance,setup,findings,hosts,pull,delete,interactive,website,auto}
+                        Available commands
     init                Create a new project and set it as active
     list                List all projects (local and S3)
-    set                 Switch the active project by name or UUID prefix
-    assets              Create and manage assets (networks, hosts, lists)
+    set                 Switch the active project
+    rename              Rename an existing project
+    assets              Create and manage assets (networks, hosts, credentials)
     recon               Run reconnaissance and scanning workflows
-    auto                Fully automated scan pipeline (project → asset → discovery → recon → hosts)
     ai-review           AI-powered review and analysis of scan results
     ai-report-enhance   AI enhancement of existing findings
     setup               Interactive configuration wizard
@@ -67,16 +66,19 @@ positional arguments:
     hosts               View discovered hosts, services, and evidence
     pull                Pull projects from AWS S3
     delete              Delete a project and all its resources
-    interactive         Launch the interactive terminal UI using Textual
+    interactive         Launch the Textual-based interactive TUI
     website             Serve the Textual TUI as a web application
+    auto                Fully automated scan pipeline (project → asset → discovery → recon → hosts)
 
 options:
   -h, --help            show this help message and exit
-  --sync                Enable AWS S3 sync
-  --no-sync             Disable AWS S3 sync
-  --project PROJECT     Override active project name
-  --verbose             Enable verbose output
-  --config CONFIG       Update config.json with JSON string
+  -s, --sync            Enable AWS S3 sync
+  -ns, --no-sync        Disable AWS S3 sync
+  -p PROJECT, --project PROJECT
+                        Override active project name
+  -v, --verbose         Enable verbose output
+  -c CONFIG, --config CONFIG
+                        Update config.json with JSON string
 ```
 
 ## Workflow
@@ -92,10 +94,16 @@ setup → init → assets → recon → ai-review → ai-report-enhance → find
 ```bash
 # One command does it all: create project, create asset, discover hosts,
 # run top-1000 + netsec scans, and display results
-netpal auto --project "HTB Prolabs" --range "10.0.0.0/24" --interface "eth0"
+netpal auto --range "10.0.0.0/24" --interface "eth0"
 
-# Or Scan a list of hosts/IPs from a file
-netpal auto --file bugbounty_targets.txt --interface "eth0" --asset-name "Bounty List"
+# Or specify a project name (creates or reuses an existing project)
+netpal auto --project "Client Pentest" --range "10.0.0.0/24" --interface "eth0"
+
+# Scan a list of hosts/IPs from a file
+netpal auto --file targets.txt --interface "eth0" --asset-name "Server List"
+
+# Both a CIDR range and a file at once
+netpal auto --range "10.0.0.0/24" --file extra_hosts.txt --interface "eth0"
 ```
 
 ### Step-by-Step Workflow
@@ -140,6 +148,28 @@ netpal findings
 netpal hosts
 ```
 
+### Collaborating Workflow
+
+```bash
+# 1. Configure AWS netpal-user profile
+aws configure set aws_access_key_id \"YOUR_KEY\" --profile netpal-user
+aws configure set aws_secret_access_key \"YOUR_SECRET\" --profile netpal-user
+ws configure set region us-west-2 --profile netpal-user
+netpal --config '{"aws_sync_account": "123456789012", "aws_sync_profile": "netpal-user"}'
+
+# 2. Pull project from S3
+netpal pull # To get project name or ID
+netpal pull -id "NETP-2002-ABCD"
+
+# 3. Set project as your primary
+netpal set "NETP-2002-ABCD"
+
+# 4. View hosts/findings
+netpal hosts
+netpal findings
+netpalui # or use flask app to view hosts and findings
+```
+
 ## Scan Types
 
 | Type | Description |
@@ -180,17 +210,16 @@ scan_results/
     └── <asset>/
         ├── scan_*.xml
         └── auto_tools/
-            ├── auto_httpx_*.txt
-            ├── auto_httpx_*.png
+            ├── auto_playwright_*.txt
+            ├── auto_playwright_*.png
             └── nuclei_*.jsonl
 ```
 
 ## Troubleshooting
 
 ```bash
-# Nmap Permission errors - Setup Passordless sudo
-sudo sh -c "echo '$USER ALL=(ALL) NOPASSWD: $(which nmap), $(which chown)' > /etc/sudoers.d/netpal-$USER"
-sudo chmod 0440 /etc/sudoers.d/netpal-$USER
+# Permission errors — sudo credentials will be requested automatically for nmap
+netpal recon --asset DMZ --type top100
 
 # Tool not found — add Go binaries to PATH
 export PATH=$PATH:~/go/bin
@@ -198,8 +227,20 @@ export PATH=$PATH:~/go/bin
 # AI not working — verify provider config
 netpal setup
 
-# httpx errors — install chromium
-sudo apt install chromium-browser
+# Playwright errors — install Chromium browser for Playwright
+playwright install chromium
+
+# Passwordless sudo for nmap — install.sh offers to configure this automatically.
+# To set up manually:
+sudo sh -c "echo '$USER ALL=(ALL) NOPASSWD: $(which nmap), $(which chown)' > /etc/sudoers.d/netpal-$USER"
+sudo chmod 0440 /etc/sudoers.d/netpal-$USER
+
+# If on Mac, screenshots error out with "Call log: navigating to "{url}", waiting until "networkidle"
+# This may be caused by Local Network app access
+tccutil reset SystemPolicyNetworkVolumes
+# Then close app, re-open, try to run, and will get prompt with 'Allow "App" to find devices on local network?'
+
+# If on Mac, nuclei is not running, open "Settings" app > Privacy and Security. Then scroll down under "Security" and select "Allow Anyways" under nuclei
 ```
 
 ## Contributing
@@ -208,8 +249,7 @@ See [CONTRIBUTION.md](CONTRIBUTION.md) for project structure, code style, and ho
 
 ## Support
 
-- **Issues**: https://github.com/DefenderGB/NetPal/issues
-- **Developer Questions**: defender-gb@protonmail.com
+- **Contact**: defender-gb@protonmail.com
 
 ## License
 

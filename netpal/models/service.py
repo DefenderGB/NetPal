@@ -1,8 +1,9 @@
 """
 Service model for network services
 """
+import os
 import time
-from ..utils.persistence.file_utils import make_path_relative_to_scan_results
+from ..utils.persistence.file_utils import make_path_relative_to_scan_results, resolve_scan_results_path
 
 
 class Service:
@@ -31,17 +32,19 @@ class Service:
         self.proofs = proofs if proofs is not None else []
     
     def add_proof(self, proof_type, result_file=None, screenshot_file=None,
-                  response_file=None, raw_output=None, utc_ts=None):
+                  response_file=None, raw_output=None, utc_ts=None,
+                  http_file=None):
         """
         Add proof/evidence for this service.
         
         Args:
-            proof_type: Type of proof (e.g., 'auto_httpx', 'nuclei', 'nmap_script')
+            proof_type: Type of proof (e.g., 'auto_playwright', 'nuclei', 'nmap_script')
             result_file: Path to result file
             screenshot_file: Path to screenshot file (optional)
-            response_file: Path to HTTP response file (optional, httpx -srd)
+            response_file: Path to HTTP response file (optional)
             raw_output: Raw output text (optional)
             utc_ts: UTC timestamp (generated if not provided)
+            http_file: Path to HTTP capture file from recon_http (optional)
         """
         if utc_ts is None:
             utc_ts = int(time.time())
@@ -57,8 +60,15 @@ class Service:
             proof["screenshot_file"] = make_path_relative_to_scan_results(screenshot_file)
         if response_file:
             proof["response_file"] = make_path_relative_to_scan_results(response_file)
+        if http_file:
+            proof["http_file"] = make_path_relative_to_scan_results(http_file)
         if raw_output:
             proof["raw_output"] = raw_output
+        
+        # Determine output validity — True when result_file exists and
+        # is non-empty, False otherwise.  Allows downstream consumers
+        # (e.g. AI review) to skip proofs with no actionable content.
+        proof["output"] = self._file_has_content(result_file)
         
         # Check for existing proof of same type
         for existing in self.proofs:
@@ -66,6 +76,18 @@ class Service:
                 return  # Duplicate, don't add
         
         self.proofs.append(proof)
+
+    @staticmethod
+    def _file_has_content(file_path) -> bool:
+        """Return True if the file exists and has non-zero size."""
+        if not file_path:
+            return False
+        try:
+            # Resolve relative paths against scan_results dir
+            resolved = resolve_scan_results_path(file_path)
+            return os.path.isfile(resolved) and os.path.getsize(resolved) > 0
+        except (OSError, TypeError):
+            return False
     
     def get_protocol(self) -> str:
         """Determine HTTP protocol based on port and service name.

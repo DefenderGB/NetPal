@@ -44,7 +44,7 @@ class FindingsCLIHandler(ModeHandler):
             import json
             print(json.dumps([f.to_dict() for f in findings], indent=2))
         else:
-            display_findings_summary(self.project)
+            display_findings_summary(findings, self.project.hosts)
         
         return True
     

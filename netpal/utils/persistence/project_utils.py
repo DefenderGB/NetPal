@@ -9,6 +9,53 @@ from ..config_loader import ConfigLoader
 import sys
 
 
+def resolve_project_by_identifier(identifier, projects=None):
+    """Resolve a project from the registry by name, ID, or external ID.
+
+    Matching priority:
+      1. Exact name (case-insensitive)
+      2. Exact or prefix project ID
+      3. Exact external ID (case-insensitive)
+      4. Partial name match (single result only)
+
+    Args:
+        identifier: User-supplied name, project ID, or external ID.
+        projects: Optional list of project dicts. If None, loads from registry.
+
+    Returns:
+        Matching project dict, or None.
+    """
+    if projects is None:
+        projects = list_registered_projects()
+
+    # 1. Exact name match (case-insensitive)
+    for proj in projects:
+        if proj.get('name', '').lower() == identifier.lower():
+            return proj
+
+    # 2. ID prefix match
+    for proj in projects:
+        pid = proj.get('id', '')
+        if pid == identifier or pid.startswith(identifier):
+            return proj
+
+    # 3. External ID match (case-insensitive)
+    for proj in projects:
+        ext_id = proj.get('external_id', '')
+        if ext_id and ext_id.lower() == identifier.lower():
+            return proj
+
+    # 4. Partial name match (only if single match)
+    candidates = [
+        p for p in projects
+        if identifier.lower() in p.get('name', '').lower()
+    ]
+    if len(candidates) == 1:
+        return candidates[0]
+
+    return None
+
+
 def select_or_sync_project(config, aws_sync=None):
     """
     Let user select an existing project or sync from S3.
@@ -132,7 +179,7 @@ def select_from_local_projects(projects, config):
         proj_id = proj.get('id', 'Unknown')
         external_id = proj.get('external_id', '')
         external_str = f" [Ext ID: {external_id}]" if external_id else ""
-        print(f"{idx}. {proj_name} (ID: {proj_id[:8]}...){external_str}")
+        print(f"{idx}. {proj_name} (ID: {proj_id}){external_str}")
     
     print("0. Cancel")
     
@@ -251,3 +298,73 @@ def load_or_create_project(config, Project, aws_sync=None):
     
     return project
 
+
+def create_project_headless(
+    name: str,
+    config: dict,
+    description: str = "",
+    external_id: str = "",
+    cloud_sync: bool = False,
+    aws_sync=None,
+):
+    """Create a project, save it, register it, and update config.
+
+    This is the shared, UI-agnostic project creation logic used by both
+    the CLI ``InitHandler`` and the TUI ``CreateProjectScreen``.
+
+    Args:
+        name: Project name (must be non-empty and unique).
+        config: Current configuration dictionary.
+        description: Optional project description (stored for reference only).
+        external_id: Optional external tracking ID.  Falls back to
+            ``config["external_id"]`` when empty.
+        cloud_sync: Whether to enable S3 cloud sync.
+        aws_sync: Optional ``AwsSyncService`` instance for S3 operations.
+
+    Returns:
+        The created ``Project`` instance.
+
+    Raises:
+        ValueError: If *name* is empty or a project with the same name
+            already exists in the local registry.
+    """
+    from ...models.project import Project
+    from .file_utils import register_project, list_registered_projects
+    from .project_persistence import save_project_to_file
+
+    if not name or not name.strip():
+        raise ValueError("Project name is required.")
+
+    name = name.strip()
+
+    # Check for duplicate name
+    existing_projects = list_registered_projects()
+    for proj in existing_projects:
+        if proj.get("name", "").lower() == name.lower():
+            raise ValueError(
+                f"A project named '{proj['name']}' already exists "
+                f"(ID: {proj['id']})."
+            )
+
+    # Resolve external_id fallback
+    if not external_id:
+        external_id = (config or {}).get("external_id", "")
+
+    # Create the project object
+    project = Project(name=name, cloud_sync=cloud_sync)
+    if external_id:
+        project.external_id = external_id
+
+    # Persist: save project data, register, and update active project
+    save_project_to_file(project, aws_sync)
+    register_project(
+        project_id=project.project_id,
+        project_name=project.name,
+        updated_utc_ts=project.modified_utc_ts,
+        external_id=project.external_id,
+        cloud_sync=project.cloud_sync,
+        aws_sync=aws_sync,
+    )
+    ConfigLoader.update_config_project_name(name)
+
+    return project

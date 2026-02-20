@@ -84,7 +84,7 @@ class NucleiRunner(BaseToolRunner):
             cmd.extend(['-H', f'User-Agent: {user_agent}'])
         
         if template:
-            cmd.extend(['-t', template])
+            cmd.extend(['-t', os.path.expanduser(template)])
         
         try:
             if callback:

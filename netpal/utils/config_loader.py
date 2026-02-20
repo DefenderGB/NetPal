@@ -16,7 +16,7 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "exclude": "",
     "exclude-ports": "",
     "user-agent": "",
-    "web_ports": [80, 443, 593, 808, 3000, 4443, 5000, 5800, 5801, 6543, 7443, 7627, 8000, 8003, 8008, 8080, 8443, 8501, 8888],
+    "web_ports": [80, 443, 593, 808, 3000, 4443, 5000, 5800, 5801, 6543, 7443, 7627, 8000, 8003, 8008, 8080, 8443, 8501, 8888, 9443],
     "web_services": ["http", "https", "http-alt", "http-proxy", "https-alt"],
     "aws_sync_account": "",
     "aws_sync_profile": "",
@@ -269,9 +269,9 @@ def get_user_agent(config: Optional[Dict[str, Any]]) -> Optional[str]:
         User-agent string or None if not configured or empty
         
     Example:
-        >>> config = {'user-agent': 'NetPal/1.1'}
+        >>> config = {'user-agent': 'NetPal/1.0'}
         >>> get_user_agent(config)
-        'NetPal/1.1'
+        'NetPal/1.0'
         >>> get_user_agent({'user-agent': '  '})
         None
         >>> get_user_agent(None)

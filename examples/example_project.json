@@ -49,9 +49,9 @@
           "extrainfo": "Ubuntu",
           "proof": [
             {
-              "type": "auto_httpx",
+              "type": "auto_playwright",
               "utc_ts": 1704067200,
-              "result_file": "/path/to/NetPal/scan_results/550e8400-e29b-41d4-a716-446655440000/192_168_1_1/auto_tools/auto_httpx_192-168-1-1_80_1704067200.txt"
+              "result_file": "/path/to/NetPal/scan_results/550e8400-e29b-41d4-a716-446655440000/192_168_1_1/auto_tools/auto_playwright_192-168-1-1_80_1704067200.txt"
             }
           ]
         }
@@ -90,10 +90,10 @@
           "extrainfo": "Ubuntu",
           "proof": [
             {
-              "type": "auto_httpx",
+              "type": "auto_playwright",
               "utc_ts": 1704067260,
-              "result_file": "/path/to/NetPal/scan_results/550e8400-e29b-41d4-a716-446655440000/192_168_1_10/auto_tools/auto_httpx_192-168-1-10_80_1704067260.txt",
-              "screenshot_file": "/path/to/NetPal/scan_results/550e8400-e29b-41d4-a716-446655440000/192_168_1_10/auto_tools/auto_httpx_192-168-1-10_80_1704067260.png"
+              "result_file": "/path/to/NetPal/scan_results/550e8400-e29b-41d4-a716-446655440000/192_168_1_10/auto_tools/auto_playwright_192-168-1-10_80_1704067260.txt",
+              "screenshot_file": "/path/to/NetPal/scan_results/550e8400-e29b-41d4-a716-446655440000/192_168_1_10/auto_tools/auto_playwright_192-168-1-10_80_1704067260.png"
             }
           ]
         },
@@ -105,10 +105,10 @@
           "extrainfo": "Ubuntu",
           "proof": [
             {
-              "type": "auto_httpx",
+              "type": "auto_playwright",
               "utc_ts": 1704067270,
-              "result_file": "/path/to/NetPal/scan_results/550e8400-e29b-41d4-a716-446655440000/192_168_1_10/auto_tools/auto_httpx_192-168-1-10_443_1704067270.txt",
-              "screenshot_file": "/path/to/NetPal/scan_results/550e8400-e29b-41d4-a716-446655440000/192_168_1_10/auto_tools/auto_httpx_192-168-1-10_443_1704067270.png"
+              "result_file": "/path/to/NetPal/scan_results/550e8400-e29b-41d4-a716-446655440000/192_168_1_10/auto_tools/auto_playwright_192-168-1-10_443_1704067270.txt",
+              "screenshot_file": "/path/to/NetPal/scan_results/550e8400-e29b-41d4-a716-446655440000/192_168_1_10/auto_tools/auto_playwright_192-168-1-10_443_1704067270.png"
             }
           ]
         },
@@ -120,9 +120,9 @@
           "extrainfo": "",
           "proof": [
             {
-              "type": "auto_httpx",
+              "type": "auto_playwright",
               "utc_ts": 1704067280,
-              "result_file": "/path/to/NetPal/scan_results/550e8400-e29b-41d4-a716-446655440000/192_168_1_10/auto_tools/auto_httpx_192-168-1-10_8080_1704067280.txt"
+              "result_file": "/path/to/NetPal/scan_results/550e8400-e29b-41d4-a716-446655440000/192_168_1_10/auto_tools/auto_playwright_192-168-1-10_8080_1704067280.txt"
             }
           ]
         }

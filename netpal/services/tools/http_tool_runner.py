@@ -1,7 +1,7 @@
 """
 HTTP custom tool runner with regex matching.
 
-Executes HTTP-based tools that require regex matching on httpx response
+Executes HTTP-based tools that require regex matching on Playwright response
 content before running. Used for tools that should only execute when
 specific patterns are found in HTTP responses.
 """
@@ -17,7 +17,7 @@ from ...utils.naming_utils import sanitize_for_filename, validate_shell_safe
 class HttpCustomToolRunner(BaseToolRunner):
     """Runs HTTP custom tools with regex-based response matching.
     
-    These tools first check the httpx response content against a regex
+    These tools first check the Playwright response content against a regex
     pattern. If the pattern matches, the configured command is executed.
     This enables conditional tool execution based on detected technologies.
     
@@ -36,7 +36,7 @@ class HttpCustomToolRunner(BaseToolRunner):
     def can_run_on_service(self, service: Service) -> bool:
         """HTTP custom tools require a web service.
         
-        Actual applicability depends on regex matching against httpx output.
+        Actual applicability depends on regex matching against Playwright output.
         
         Args:
             service: Service to check
@@ -53,9 +53,9 @@ class HttpCustomToolRunner(BaseToolRunner):
         asset_identifier: str,
         callback=None,
         tool_config: dict = None,
-        httpx_response_file: str = None
+        playwright_response_file: str = None
     ) -> ToolExecutionResult:
-        """Run HTTP custom tool with regex matching on httpx response.
+        """Run HTTP custom tool with regex matching on Playwright response.
         
         Args:
             host: Target host
@@ -63,7 +63,7 @@ class HttpCustomToolRunner(BaseToolRunner):
             asset_identifier: Asset identifier for directory structure
             callback: Optional output callback
             tool_config: Tool configuration with 'regex_match' and 'command'
-            httpx_response_file: Path to httpx response file for regex matching
+            playwright_response_file: Path to Playwright response file for regex matching
             
         Returns:
             ToolExecutionResult. If regex doesn't match, returns success with
@@ -72,15 +72,15 @@ class HttpCustomToolRunner(BaseToolRunner):
         if not tool_config:
             return ToolExecutionResult.error_result("No tool configuration provided")
         
-        if not httpx_response_file:
-            return ToolExecutionResult.error_result("No httpx response file provided")
+        if not playwright_response_file:
+            return ToolExecutionResult.error_result("No Playwright response file provided")
         
-        # Read httpx response
+        # Read Playwright response
         try:
-            with open(httpx_response_file, 'r') as f:
+            with open(playwright_response_file, 'r') as f:
                 response_content = f.read()
         except Exception as e:
-            return ToolExecutionResult.error_result(f"Error reading httpx response: {e}")
+            return ToolExecutionResult.error_result(f"Error reading Playwright response: {e}")
         
         # Check regex match
         regex_pattern = tool_config.get('regex_match', '')
@@ -123,6 +123,7 @@ class HttpCustomToolRunner(BaseToolRunner):
         
         try:
             command = shlex.split(command_str)
+            command = [os.path.expanduser(arg) for arg in command]
         except ValueError as e:
             return ToolExecutionResult.error_result(
                 f"Failed to parse command template: {e}"
@@ -134,8 +135,7 @@ class HttpCustomToolRunner(BaseToolRunner):
             
             result = self._run_subprocess(command, timeout=300, shell=False)
             
-            # If output file wasn't created by tool, create it with output
-            if not os.path.exists(output_file):
+            if not os.path.exists(output_file) or os.path.getsize(output_file) == 0:
                 self._write_command_output(output_file, command_str, result.stdout, result.stderr)
             
             return ToolExecutionResult.success_result(output_files=[output_file])

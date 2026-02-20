@@ -16,11 +16,11 @@ class NextCommandSuggester:
         },
         'asset_created': {
             'description': 'Run discovery scan on the new asset',
-            'command_template': 'netpal recon --asset {asset_name} --type nmap-discovery',
+            'command_template': 'netpal recon --asset "{asset_name}" --type nmap-discovery',
         },
         'discovery_complete': {
             'description': 'Run service detection on discovered hosts',
-            'command_template': 'netpal recon --asset {asset_name} --type top100',
+            'command_template': 'netpal recon --asset "{asset_name}" --type top100',
         },
         'recon_complete': {
             'description': 'Generate AI-powered security findings',
@@ -51,6 +51,13 @@ class NextCommandSuggester:
             asset_name = getattr(args, 'asset', None) or getattr(args, 'name', None) or '<ASSET>'
             command = flow['command_template'].format(asset_name=asset_name)
         
+        # Carry forward --interface flag only for recon / scan commands
+        _IFACE_COMMANDS = {'asset_created', 'discovery_complete'}
+        if command and args and event in _IFACE_COMMANDS:
+            interface = getattr(args, 'interface', None)
+            if interface and '-i ' not in command and '--interface' not in command:
+                command += f' -i {interface}'
+        
         print_next_command_box(description, command)
     
     @classmethod
@@ -70,13 +77,18 @@ class NextCommandSuggester:
             )
             return
         
+        # Include configured interface in recon suggestions
+        iface_flag = ''
+        if config.get('network_interface'):
+            iface_flag = f" -i {config['network_interface']}"
+        
         # Find an asset to suggest scanning
         asset_name = project.assets[0].name
         
         if not project.hosts:
             print_next_command_box(
                 f'Run discovery scan on asset "{asset_name}"',
-                f'netpal recon --asset {asset_name} --type nmap-discovery'
+                f'netpal recon --asset {asset_name} --type nmap-discovery{iface_flag}'
             )
             return
         
@@ -84,7 +96,7 @@ class NextCommandSuggester:
         if services_count == 0:
             print_next_command_box(
                 f'Run service detection on discovered hosts',
-                f'netpal recon --asset {asset_name} --type top100'
+                f'netpal recon --asset {asset_name} --type top100{iface_flag}'
             )
             return
         

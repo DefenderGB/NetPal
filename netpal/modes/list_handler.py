@@ -47,7 +47,7 @@ class ListHandler(ModeHandler):
                 s3_registry, err = self.aws_sync._download_s3_registry()
                 if s3_registry and 'projects' in s3_registry:
                     for sp in s3_registry['projects']:
-                        if sp.get('id') not in local_ids:
+                        if sp.get('id') not in local_ids and not sp.get('deleted'):
                             s3_only_projects.append(sp)
             except Exception:
                 pass  # S3 listing is best-effort

@@ -12,13 +12,12 @@ from colorama import init, Fore, Style
 from .utils.aws.aws_utils import setup_aws_sync
 from .utils.config_loader import ConfigLoader, handle_config_update
 from .utils.persistence.project_persistence import (
-    save_project_to_file, save_findings_to_file, sync_to_s3_if_enabled
+    save_project_to_file, sync_to_s3_if_enabled
 )
 from .utils.scanning.scan_helpers import run_discovery_phase
 from .utils.display.display_utils import print_banner
 from .utils.persistence.project_utils import load_or_create_project
 from .utils.display.next_command import NextCommandSuggester
-from .services.tool_runner import ToolRunner
 from .models.project import Project
 
 # Initialize colorama
@@ -42,11 +41,12 @@ RECON_EXAMPLES = """\
 Examples:
   netpal recon --asset DMZ --type nmap-discovery
   netpal recon --asset DMZ --type top100 --speed 4
-  netpal recon --asset DMZ --type allports --run-tools
+  netpal recon --asset DMZ --type allports
   netpal recon --asset DMZ --type custom --nmap-options "-p 8080,9090 -sV"
   netpal recon --discovered --type top100                # scan all discovered hosts
   netpal recon --discovered --asset DMZ --type top100    # discovered hosts in asset
   netpal recon --host 10.0.0.5 --type top100             # scan a single host
+  netpal recon --asset active_hosts_chunk_2_1771376117 --type top100  # resume from chunk
 
 Workflow:
   assets → recon → ai-review → ai-report-enhance → findings
@@ -88,12 +88,38 @@ Examples:
 Switches the active project by name or project-ID (prefix).
 """
 
+PROJECT_EDIT_EXAMPLES = """\
+Examples:
+  netpal project-edit
+
+Interactively edit the active project's name, external ID, and cloud sync setting.
+"""
+
+RECON_TOOLS_EXAMPLES = """\
+Examples:
+  netpal recon-tools                           # list all available targets
+  netpal recon-tools --list                    # list all available exploit tools
+  netpal recon-tools -t all_discovered         # run tools on all discovered hosts
+  netpal recon-tools -t DMZ_discovered         # run tools on hosts from DMZ asset
+  netpal recon-tools -t all_discovered --project "Other Project"
+  netpal recon-tools -t all_discovered --http-recon  # only run Playwright on HTTP/HTTPS services
+  netpal recon-tools --host 10.0.0.5 --port 80 --tool 'FTP Anonymous Login'
+  netpal recon-tools --host 10.0.0.253 --port 80 --tool 'Unauthenticated Bosch R2 Dashboard Access'
+
+Lists targets with host and service counts, or runs exploit tools
+(Playwright, Nuclei, nmap scripts, HTTP tools) against a chosen target.
+Use --list to see all configured exploit tools.
+Use --host, --port, and --tool to run a specific tool against a specific host/port.
+Use --http-recon to run only Playwright screenshots/response capture on web services.
+"""
+
 AUTO_EXAMPLES = """\
 Examples:
   netpal auto --range "10.0.0.0/24" --interface "eth0"
   netpal auto --project "Client Pentest" --range "10.0.0.0/24" --interface "eth0"
   netpal auto --file targets.txt --interface "eth0" --asset-name "Server List"
   netpal auto --range "10.0.0.0/24" --file extra_hosts.txt --interface "eth0"
+  netpal auto --range "10.0.0.0/24" --interface "eth0" --external-id "ASANA-456"
 
 Runs a fully automated pipeline:
   1. Creates (or reuses) a project
@@ -113,7 +139,6 @@ class NetPal:
         self.config = None
         self.project = None
         self.scanner = None
-        self.tool_runner = None
         self.running = True
         self.aws_sync = None
         
@@ -138,11 +163,12 @@ class NetPal:
         self.aws_sync = setup_aws_sync(self.config, auto_sync)
         return self.aws_sync is not None
     
-    def run_discovery(self, asset, speed=None):
+    def run_discovery(self, asset, speed=None, verbose=False):
         """Run discovery phase (ping scan)."""
         # Execute discovery scan
         hosts = run_discovery_phase(
-            self.scanner, asset, self.project, self.config, speed, self._output_callback
+            self.scanner, asset, self.project, self.config, speed, self._output_callback,
+            verbose=verbose
         )
         
         if hosts:
@@ -157,77 +183,6 @@ class NetPal:
             sync_to_s3_if_enabled(self.aws_sync, self.project)
         
         return hosts
-    
-    def _run_exploit_tools_cli(self, hosts_with_services):
-        """Run exploit tools on existing hosts."""
-        from .utils.config_loader import ConfigLoader
-        
-        print(f"{Fore.CYAN}[INFO] Running exploit tools on {len(hosts_with_services)} host(s) with services{Style.RESET_ALL}\n")
-        
-        # Load exploit tools configuration
-        exploit_tools = ConfigLoader.load_exploit_tools()
-        
-        # Initialize tool runner
-        tool_runner = ToolRunner(self.project.project_id, self.config)
-        
-        # Track statistics
-        tools_executed = 0
-        
-        # Execute tools on each host
-        for host in hosts_with_services:
-            print(f"\n{Fore.CYAN}[HOST] Processing {host.ip}{Style.RESET_ALL}")
-            
-            # Get asset for this host
-            asset = None
-            for a in self.project.assets:
-                if a.asset_id in host.assets:
-                    asset = a
-                    break
-            
-            if not asset:
-                print(f"{Fore.YELLOW}[WARNING] No asset found for host, skipping{Style.RESET_ALL}")
-                continue
-            
-            for service in host.services:
-                # Execute tools using tool_runner
-                results = tool_runner.execute_exploit_tools(
-                    host, service, asset.get_identifier(),
-                    exploit_tools, self._output_callback
-                )
-                
-                # Count executed tools
-                tools_executed += len(results)
-                
-                # Add proofs to service
-                for proof_type, result_file, screenshot_file, findings in results:
-                    service.add_proof(
-                        proof_type,
-                        result_file=result_file,
-                        screenshot_file=screenshot_file
-                    )
-                    
-                    # Add findings to host
-                    for finding in findings:
-                        finding.host_id = host.host_id
-                        self.project.add_finding(finding)
-        
-        # Save project and findings
-        save_project_to_file(self.project, self.aws_sync)
-        save_findings_to_file(self.project)
-        
-        # Sync to S3 if enabled
-        if self.project and self.project.cloud_sync:
-            sync_to_s3_if_enabled(self.aws_sync, self.project)
-        
-        # Print summary
-        print(f"\n{Fore.GREEN}  ▸ Exploit Tools — Complete{Style.RESET_ALL}\n")
-        print(f"{Fore.CYAN}Summary:{Style.RESET_ALL}")
-        print(f"  Tools executed: {tools_executed}")
-        print(f"  Hosts processed: {len(hosts_with_services)}")
-        
-        total_services = sum(len(h.services) for h in hosts_with_services)
-        print(f"  Services scanned: {total_services}")
-        print(f"  Findings generated: {len(self.project.findings)}")
 
 
 # ── Argument Parser ────────────────────────────────────────────────────────
@@ -241,15 +196,15 @@ def create_argument_parser():
     )
 
     # Global flags (apply to all subcommands)
-    parser.add_argument('--sync', action='store_true', help='Enable AWS S3 sync')
-    parser.add_argument('--no-sync', action='store_true', help='Disable AWS S3 sync')
-    parser.add_argument('--project', help='Override active project name')
-    parser.add_argument('--verbose', action='store_true', help='Enable verbose output')
-    parser.add_argument('--config', help='Update config.json with JSON string')
+    parser.add_argument('-s','--sync', action='store_true', help='Enable AWS S3 sync')
+    parser.add_argument('-ns','--no-sync', action='store_true', help='Disable AWS S3 sync')
+    parser.add_argument('-p','--project', help='Override active project name')
+    parser.add_argument('-v','--verbose', action='store_true', help='Enable verbose output')
+    parser.add_argument('-c','--config', help='Update config.json with JSON string')
 
     # Shared parent so --verbose works after the subcommand name too
     _verbose_parent = argparse.ArgumentParser(add_help=False)
-    _verbose_parent.add_argument('--verbose', action='store_true', help='Enable verbose output')
+    _verbose_parent.add_argument('-v','--verbose', action='store_true', help='Enable verbose output')
 
     subparsers = parser.add_subparsers(dest='command', help='Available commands')
 
@@ -265,7 +220,7 @@ def create_argument_parser():
     init_parser.add_argument('name', help='Project name')
     init_parser.add_argument('description', nargs='?', default='',
                              help='Project description (optional)')
-    init_parser.add_argument('--external-id', default='',
+    init_parser.add_argument('-ei','--external-id', default='',
                              help='External tracking ID (e.g. ASANA-123)')
 
     # ── list ───────────────────────────────────────────────────────────
@@ -287,6 +242,16 @@ def create_argument_parser():
     )
     set_parser.add_argument('identifier', help='Project name or project-ID (prefix)')
 
+    # ── project-edit ───────────────────────────────────────────────────
+    subparsers.add_parser(
+        'project-edit',
+        parents=[_verbose_parent],
+        help='Interactively edit the active project',
+        description='Edit the active project name, external ID, and cloud sync setting.',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=PROJECT_EDIT_EXAMPLES,
+    )
+
     # ── assets (formerly asset-create) ─────────────────────────────────
     asset_parser = subparsers.add_parser(
         'assets',
@@ -298,16 +263,18 @@ def create_argument_parser():
     )
     asset_parser.add_argument('type', nargs='?', choices=['network', 'list', 'single'],
                               default=None,
-                              help='Asset type: network (CIDR range), list (host list), single (one host)')
-    asset_parser.add_argument('--name', help='Human-readable asset name')
-    asset_parser.add_argument('--range', help='CIDR range (network type)')
-    asset_parser.add_argument('--targets', help='Comma-separated target list or .txt file (list type)')
-    asset_parser.add_argument('--target', help='Single IP/hostname (single type)')
-    asset_parser.add_argument('--file', help='Path to host-list file (list type)')
-    asset_parser.add_argument('--external-id', help='External tracking ID')
-    asset_parser.add_argument('--list', action='store_true', dest='list_assets',
+                              help='3 Asset type: network (CIDR range), list (host list), single (one host)')
+    asset_parser.add_argument('-n','--name', help='Human-readable asset name')
+    asset_parser.add_argument('-r','--range', help='CIDR range (network type)')
+    asset_parser.add_argument('-ts','--targets', help='Comma-separated target list or .txt file (list type)')
+    asset_parser.add_argument('-t','--target', help='Single IP/hostname (single type)')
+    asset_parser.add_argument('-f','--file', help='Path to host-list file (list type)')
+    asset_parser.add_argument('-ei','--external-id', help='External tracking ID')
+    asset_parser.add_argument('-l','--list', action='store_true', dest='list_assets',
                               help='List all assets in the active project')
-    asset_parser.add_argument('--delete', help='Delete asset by name')
+    asset_parser.add_argument('-d','--delete', help='Delete asset by name')
+    asset_parser.add_argument('--clear', action='store_true', dest='clear_orphans',
+                              help='Remove hosts not tied to any asset')
 
     # ── recon ──────────────────────────────────────────────────────────
     recon_parser = subparsers.add_parser(
@@ -318,28 +285,56 @@ def create_argument_parser():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=RECON_EXAMPLES,
     )
-    recon_parser.add_argument('--asset', help='Asset name to scan (or filter --discovered)')
-    recon_parser.add_argument('--discovered', action='store_true',
+    recon_parser.add_argument('-a','--asset', help='Asset name to scan (or filter --discovered)')
+    recon_parser.add_argument('-d','--discovered', action='store_true',
                               help='Scan previously discovered hosts (optionally with --asset)')
-    recon_parser.add_argument('--host', help='Scan a single IP or hostname')
-    recon_parser.add_argument('--type', dest='scan_type', required=True,
+    recon_parser.add_argument('-H','--host', help='Scan a single IP or hostname')
+    recon_parser.add_argument('-t','--type', dest='scan_type', required=True,
                               choices=['nmap-discovery', 'top100', 'top1000',
                                        'http', 'netsec', 'allports', 'custom'],
                               help='Scan type')
-    recon_parser.add_argument('--speed', type=int, choices=[1, 2, 3, 4, 5], default=3,
+    recon_parser.add_argument('-s','--speed', type=int, choices=[1, 2, 3, 4, 5], default=3,
                               help='Nmap timing template (default: 3)')
-    recon_parser.add_argument('--interface', help='Network interface override')
-    recon_parser.add_argument('--skip-discovery', action='store_true',
+    recon_parser.add_argument('-i','--interface', help='Network interface override')
+    recon_parser.add_argument('-sd','--skip-discovery', action='store_true',
                               help='Skip ping discovery (-Pn)')
-    recon_parser.add_argument('--run-tools', action='store_true',
-                              help='Auto-run exploit tools after recon')
-    recon_parser.add_argument('--nmap-options', help='Custom nmap options (--type custom)')
-    recon_parser.add_argument('--exclude', help='IPs or networks to exclude (e.g. 10.0.0.1,10.0.10.0/24)')
-    recon_parser.add_argument('--exclude-ports', help='Ports to exclude')
-    recon_parser.add_argument('--rerun-autotools', dest='rerun_autotools', default='2',
+    recon_parser.add_argument('-no','--nmap-options', help='Custom nmap options (--type custom)')
+    recon_parser.add_argument('-e','--exclude', help='IPs or networks to exclude (e.g. 10.0.0.1,10.0.10.0/24)')
+    recon_parser.add_argument('-ep','--exclude-ports', help='Ports to exclude')
+    recon_parser.add_argument('-rra','--rerun-autotools', dest='rerun_autotools', default='2',
                               help='Re-run auto-tools policy: Y (always), N (never), '
                                    'or number of days (e.g. 2, 7) — re-run if last '
                                    'execution was more than N days ago (default: 2)')
+
+    # ── recon-tools ───────────────────────────────────────────────────
+    recon_tools_parser = subparsers.add_parser(
+        'recon-tools',
+        parents=[_verbose_parent],
+        help='List targets or run exploit tools against discovered hosts',
+        description='Show available recon targets (hosts/services per asset) or run '
+                    'exploit tools (Playwright, Nuclei, nmap scripts, HTTP tools) '
+                    'against a chosen target.',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=RECON_TOOLS_EXAMPLES,
+    )
+    recon_tools_parser.add_argument('-t','--target', default=None,
+                                    help='Target name to run tools against '
+                                         '(e.g. all_discovered, DMZ_discovered)')
+    recon_tools_parser.add_argument('--http-recon', action='store_true', dest='http_recon',
+                                    help='Only run Playwright on HTTP/HTTPS services '
+                                         '(skip Nuclei, nmap scripts, and HTTP tools)')
+    recon_tools_parser.add_argument('-l','--list', action='store_true', dest='list_tools',
+                                    help='List all available exploit tools from exploit_tools.json')
+    recon_tools_parser.add_argument('-H','--host', default=None,
+                                    help='Run tools against a specific host IP')
+    recon_tools_parser.add_argument('-P','--port', type=int, default=None,
+                                    help='Run tools against a specific port on the host')
+    recon_tools_parser.add_argument('--tool', default=None,
+                                    help='Run a specific tool by name '
+                                         '(e.g. "Unauthenticated Bosch R2 Dashboard Access")')
+    recon_tools_parser.add_argument('-rra','--rerun-autotools', dest='rerun_autotools', default='2',
+                                    help='Re-run auto-tools policy: Y (always), N (never), '
+                                         'or number of days (default: 2)')
 
     # ── ai-review ──────────────────────────────────────────────────────
     ai_review_parser = subparsers.add_parser(
@@ -350,11 +345,11 @@ def create_argument_parser():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=AI_REVIEW_EXAMPLES,
     )
-    ai_review_parser.add_argument('--asset', help='Limit analysis to specific asset')
-    ai_review_parser.add_argument('--batch-size', type=int, default=5,
+    ai_review_parser.add_argument('-a','--asset', help='Limit analysis to specific asset')
+    ai_review_parser.add_argument('-bs','--batch-size', type=int, default=5,
                                   help='Hosts per AI batch (default: 5)')
-    ai_review_parser.add_argument('--provider', help='Override AI provider')
-    ai_review_parser.add_argument('--model', help='Override AI model')
+    ai_review_parser.add_argument('-p','--provider', help='Override AI provider')
+    ai_review_parser.add_argument('-m','--model', help='Override AI model')
 
     # ── ai-report-enhance ─────────────────────────────────────────────
     enhance_parser = subparsers.add_parser(
@@ -365,9 +360,9 @@ def create_argument_parser():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=AI_ENHANCE_EXAMPLES,
     )
-    enhance_parser.add_argument('--batch-size', type=int, default=5,
+    enhance_parser.add_argument('-bs','--batch-size', type=int, default=5,
                                 help='Findings per AI batch (default: 5)')
-    enhance_parser.add_argument('--severity',
+    enhance_parser.add_argument('-s','--severity',
                                 choices=['Critical', 'High', 'Medium', 'Low', 'Info'],
                                 help='Only enhance findings of this severity')
 
@@ -386,11 +381,11 @@ def create_argument_parser():
         help='View and manage security findings',
         description='Display findings summary and details for the active project.',
     )
-    findings_parser.add_argument('--severity', help='Filter by severity')
-    findings_parser.add_argument('--host', help='Filter by host IP')
-    findings_parser.add_argument('--format', choices=['table', 'json'], default='table',
+    findings_parser.add_argument('-s','--severity', help='Filter by severity')
+    findings_parser.add_argument('-H','--host', help='Filter by host IP')
+    findings_parser.add_argument('-f','--format', choices=['table', 'json'], default='table',
                                  help='Output format')
-    findings_parser.add_argument('--delete', help='Delete finding by ID')
+    findings_parser.add_argument('-d','--delete', help='Delete finding by ID')
 
 
     # ── hosts ─────────────────────────────────────────────────────────
@@ -400,7 +395,7 @@ def create_argument_parser():
         help='View discovered hosts, services, and evidence',
         description='Display all hosts in the active project with open ports and evidence file paths.',
     )
-    hosts_parser.add_argument('--host', help='Filter by host IP')
+    hosts_parser.add_argument('-H','--host', help='Filter by host IP')
     # ── pull ───────────────────────────────────────────────────────────
     pull_parser = subparsers.add_parser(
         'pull',
@@ -408,8 +403,37 @@ def create_argument_parser():
         help='Pull projects from AWS S3',
         description='Download projects from S3 cloud storage.',
     )
-    pull_parser.add_argument('--id', help='Specific project ID to pull')
-    pull_parser.add_argument('--all', action='store_true', help='Pull all projects')
+    pull_parser.add_argument('-id','--id', help='Specific project ID to pull')
+    pull_parser.add_argument('-a','--all', action='store_true', help='Pull all projects')
+
+    # ── push ───────────────────────────────────────────────────────────
+    subparsers.add_parser(
+        'push',
+        parents=[_verbose_parent],
+        help='Push active project to AWS S3',
+        description='Upload the active cloud-sync-enabled project to S3.',
+    )
+
+    # ── export ────────────────────────────────────────────────────────
+    export_parser = subparsers.add_parser(
+        'export',
+        parents=[_verbose_parent],
+        help='Export project scan results as a zip archive',
+        description='Export all scan results for a project into a zip file under exports/.',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""\
+Examples:
+  netpal export                          # list all projects available for export
+  netpal export "Client Pentest Q1"      # export by project name
+  netpal export "NETP-2602-ABCD"         # export by project ID
+  netpal export "PEN-TEST-1234"          # export by external ID
+
+Creates a zip archive under exports/ containing the project JSON,
+findings JSON, and all evidence files from scan_results/.
+""",
+    )
+    export_parser.add_argument('identifier', nargs='?', default=None,
+                               help='Project name, project ID, or external ID (omit to list projects)')
 
     # ── delete ────────────────────────────────────────────────────────
     delete_parser = subparsers.add_parser(
@@ -418,8 +442,8 @@ def create_argument_parser():
         help='Delete a project and all its resources',
         description='Permanently delete a project, its scan results, and findings.',
     )
-    delete_parser.add_argument('--project', dest='project_name', required=True,
-                               help='Name of the project to delete')
+    delete_parser.add_argument('name', nargs='?', default=None,
+                               help='Project name, ID, or external ID to delete (omit to list projects)')
 
     # ── interactive ───────────────────────────────────────────────────
     subparsers.add_parser(
@@ -450,17 +474,19 @@ def create_argument_parser():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=AUTO_EXAMPLES,
     )
-    auto_parser.add_argument('--project', dest='project', default=None,
+    auto_parser.add_argument('-p', '--project', dest='project', default=None,
                              help='Project name (default: auto-generated "Auto Project N")')
-    auto_parser.add_argument('--range', default=None,
+    auto_parser.add_argument('-r', '--range', default=None,
                              help='CIDR range to scan (e.g. 10.0.0.0/24)')
-    auto_parser.add_argument('--file', default=None,
+    auto_parser.add_argument('-f', '--file', default=None,
                              help='Path to a file containing IPs/hosts (one per line)')
-    auto_parser.add_argument('--asset-name', dest='asset_name', default=None,
+    auto_parser.add_argument('-a', '--asset-name', dest='asset_name', default=None,
                              help='Custom asset name (default: auto-generated "Auto asset N")')
-    auto_parser.add_argument('--interface', required=True,
+    auto_parser.add_argument('-i', '--interface', required=True,
                              help='Network interface to use (e.g. eth0)')
-    auto_parser.add_argument('--rerun-autotools', dest='rerun_autotools', default='2',
+    auto_parser.add_argument('-e', '--external-id', dest='external_id', default='',
+                             help='External tracking ID (e.g. ASANA-456)')
+    auto_parser.add_argument('-rra', '--rerun-autotools', dest='rerun_autotools', default='2',
                              help='Re-run auto-tools policy: Y (always), N (never), '
                                   'or number of days (e.g. 2, 7) — re-run if last '
                                   'execution was more than N days ago (default: 2)')
@@ -577,6 +603,7 @@ def display_dashboard(config, project, aws_sync):
     print(f"    netpal init              Create a new project")
     print(f"    netpal list              List all projects")
     print(f"    netpal set               Switch active project")
+    print(f"    netpal project-edit      Edit active project settings")
     print(f"    netpal assets            Create and manage assets")
     print(f"    netpal hosts             View discovered hosts & evidence")
     print(f"    netpal recon             Run reconnaissance scans")
@@ -585,7 +612,10 @@ def display_dashboard(config, project, aws_sync):
     print(f"    netpal findings          View security findings")
     print(f"    netpal setup             Configuration wizard")
     print(f"    netpal pull              Pull projects from S3")
+    print(f"    netpal push              Push active project to S3")
     print(f"    netpal auto              Fully automated scan pipeline")
+    print(f"    netpal recon-tools       List targets or run exploit tools")
+    print(f"    netpal export            Export project scan results as zip")
     
     # Contextual next-step suggestion
     NextCommandSuggester.suggest_for_project(project, config)
@@ -662,7 +692,44 @@ def main():
     # Handle website (serve TUI in browser)
     if args.command == 'website':
         from textual_serve.server import Server
-        server = Server(f"{sys.executable} -m netpal.tui", port=7123)
+        from .utils.validation import get_interfaces_with_ips
+
+        interfaces = get_interfaces_with_ips()
+        # Filter to interfaces that have an IP address
+        interfaces_with_ip = [(name, ip) for name, ip in interfaces if ip]
+
+        if not interfaces_with_ip:
+            print(f"{Fore.RED}[ERROR] No network interfaces with IP addresses found.{Style.RESET_ALL}")
+            return 1
+
+        # Ask user to pick an interface
+        print(f"\n{Fore.CYAN}Available network interfaces:{Style.RESET_ALL}\n")
+        for idx, (name, ip) in enumerate(interfaces_with_ip, 1):
+            print(f"  {Fore.GREEN}{idx}{Style.RESET_ALL}) {name:<20} {ip}")
+
+        print()
+        while True:
+            try:
+                choice = input(f"{Fore.YELLOW}Select interface [1-{len(interfaces_with_ip)}]: {Style.RESET_ALL}").strip()
+                choice_idx = int(choice) - 1
+                if 0 <= choice_idx < len(interfaces_with_ip):
+                    break
+                print(f"{Fore.RED}  Invalid choice. Enter a number between 1 and {len(interfaces_with_ip)}.{Style.RESET_ALL}")
+            except (ValueError, EOFError):
+                print(f"{Fore.RED}  Invalid input. Enter a number.{Style.RESET_ALL}")
+
+        selected_name, selected_ip = interfaces_with_ip[choice_idx]
+        public_url = f"http://{selected_ip}:7123"
+        print(f"\n{Fore.GREEN}[INFO] Serving on {selected_name} ({selected_ip})")
+        print(f"[INFO] Public URL: {public_url}{Style.RESET_ALL}\n")
+
+        server = Server(
+            f"{sys.executable} -m netpal.tui",
+            port=7123,
+            host="0.0.0.0",
+            public_url=public_url,
+            title="NetPal TUI"
+        )
         server.serve()
         return 0
     
@@ -673,23 +740,29 @@ def main():
         return SetupHandler(cli).execute()
     
     # ── Lightweight commands (no active project required) ──────────────
-    if args.command in ('init', 'list', 'set', 'delete', 'pull', 'auto'):
+    if args.command in ('init', 'list', 'set', 'project-edit', 'delete', 'pull', 'push', 'auto', 'export'):
         cli = _bootstrap_lightweight(args)
 
         from .modes.init_handler import InitHandler
         from .modes.list_handler import ListHandler
         from .modes.set_handler import SetHandler
+        from .modes.project_edit_handler import ProjectEditHandler
         from .modes.delete_handler import DeleteHandler
         from .modes.pull_handler import PullHandler
+        from .modes.push_handler import PushHandler
         from .modes.auto_handler import AutoHandler
+        from .modes.export_handler import ExportHandler
 
         lightweight_handlers = {
             'init':   lambda: InitHandler(cli, args),
             'list':   lambda: ListHandler(cli, args),
             'set':    lambda: SetHandler(cli, args),
+            'project-edit': lambda: ProjectEditHandler(cli, args),
             'delete': lambda: DeleteHandler(cli, args),
             'pull':   lambda: PullHandler(cli, args),
+            'push':   lambda: PushHandler(cli, args),
             'auto':   lambda: AutoHandler(cli, args),
+            'export': lambda: ExportHandler(cli, args),
         }
         return lightweight_handlers[args.command]().execute()
     
@@ -701,6 +774,7 @@ def main():
     # Import subcommand handlers
     from .modes.asset_create_handler import AssetCreateHandler
     from .modes.recon_cli_handler import ReconCLIHandler
+    from .modes.recon_tools_handler import ReconToolsHandler
     from .modes.ai_review_handler import AIReviewHandler
     from .modes.ai_enhance_handler import AIEnhanceHandler
     from .modes.findings_cli_handler import FindingsCLIHandler
@@ -710,6 +784,7 @@ def main():
     handlers = {
         'assets': lambda: AssetCreateHandler(cli, args),
         'recon': lambda: ReconCLIHandler(cli, args),
+        'recon-tools': lambda: ReconToolsHandler(cli, args),
         'ai-review': lambda: AIReviewHandler(cli, args),
         'ai-report-enhance': lambda: AIEnhanceHandler(cli, args),
         'findings': lambda: FindingsCLIHandler(cli, args),

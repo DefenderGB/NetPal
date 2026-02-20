@@ -1,7 +1,6 @@
 """
 Project model for penetration testing engagements
 """
-import uuid
 import time
 from typing import Optional
 from .asset import Asset
@@ -20,11 +19,15 @@ class Project:
         
         Args:
             name: Project name (unique identifier)
-            project_id: Unique UUID (generated if not provided)
+            project_id: Unique project ID in NETP-YYMM-XXXX format (generated if not provided)
             external_id: External tracking ID (optional, defaults to empty string)
             cloud_sync: Whether this project is synced to S3 (optional, defaults to False)
         """
-        self.project_id = project_id if project_id else str(uuid.uuid4())
+        if project_id:
+            self.project_id = project_id
+        else:
+            from ..utils.naming_utils import generate_project_id
+            self.project_id = generate_project_id()
         self.name = name
         self.external_id = external_id
         self.cloud_sync = cloud_sync

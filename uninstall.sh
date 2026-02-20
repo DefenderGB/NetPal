@@ -26,7 +26,7 @@ ask_yes_no() {
 }
 
 # 1. Remove uv virtual environment and NetPal package
-echo "[1/7] Removing NetPal Python environment..."
+echo "[1/6] Removing NetPal Python environment..."
 
 if [ -d ".venv" ]; then
     rm -rf .venv
@@ -43,7 +43,7 @@ fi
 
 # 2. Remove sudoers rule created by install.sh
 echo ""
-echo "[2/7] Removing sudoers configuration..."
+echo "[2/6] Removing sudoers configuration..."
 
 SUDOERS_FILE="/etc/sudoers.d/netpal-$USER"
 SUDOERS_LEGACY="/etc/sudoers.d/nmap-$USER"
@@ -68,7 +68,7 @@ fi
 
 # 3. Remove scan results and project data (optional)
 echo ""
-echo "[3/7] Clean up project data?"
+echo "[3/6] Clean up project data?"
 if ask_yes_no "Remove scan_results/ directory (all projects, findings, evidence)?"; then
     if [ -d "scan_results" ]; then
         rm -rf scan_results
@@ -80,33 +80,17 @@ else
     echo "○ Keeping scan_results/ directory"
 fi
 
-# 4. Remove Go tools (optional)
+# 4. Remove Go tools (optional — nuclei only)
 echo ""
-echo "[4/7] Remove Go tools?"
-
-HTTPX_EXISTS=false
-if command -v httpx &> /dev/null || [ -f "$HOME/go/bin/httpx" ]; then
-    HTTPX_EXISTS=true
-fi
+echo "[4/6] Remove Go tools?"
 
 NUCLEI_EXISTS=false
 if command -v nuclei &> /dev/null || [ -f "$HOME/go/bin/nuclei" ]; then
     NUCLEI_EXISTS=true
 fi
 
-if [ "$HTTPX_EXISTS" = true ] || [ "$NUCLEI_EXISTS" = true ]; then
+if [ "$NUCLEI_EXISTS" = true ]; then
     echo "Found Go tools installed. These may be used by other programs."
-
-    if [ "$HTTPX_EXISTS" = true ]; then
-        if ask_yes_no "Remove httpx?"; then
-            if [ -f "$HOME/go/bin/httpx" ]; then
-                rm -f "$HOME/go/bin/httpx"
-                echo "✓ Removed ~/go/bin/httpx"
-            fi
-        else
-            echo "○ Keeping httpx"
-        fi
-    fi
 
     if [ "$NUCLEI_EXISTS" = true ]; then
         if ask_yes_no "Remove nuclei?"; then
@@ -124,7 +108,7 @@ fi
 
 # 5. Remove nmap (optional)
 echo ""
-echo "[5/7] Remove nmap?"
+echo "[5/6] Remove nmap?"
 
 if command -v nmap &> /dev/null; then
     echo "nmap is installed. It may be used by other programs."
@@ -152,47 +136,9 @@ else
     echo "○ nmap not installed"
 fi
 
-# 6. Remove Go (optional)
+# 6. Remove uv (optional)
 echo ""
-echo "[6/7] Remove Go?"
-
-if command -v go &> /dev/null; then
-    echo "Go is installed. It may be used by other programs."
-    if ask_yes_no "Uninstall Go?"; then
-        if [[ "$OS" == "linux" ]]; then
-            if command -v apt-get &> /dev/null; then
-                sudo apt-get remove -y golang-go
-                sudo apt-get autoremove -y
-            elif command -v yum &> /dev/null; then
-                sudo yum remove -y golang
-            elif command -v dnf &> /dev/null; then
-                sudo dnf remove -y golang
-            fi
-            echo "✓ Removed Go"
-        elif [[ "$OS" == "macos" ]]; then
-            if command -v brew &> /dev/null; then
-                brew uninstall golang
-                echo "✓ Removed Go"
-            fi
-        fi
-
-        # Remove Go workspace
-        if [ -d "$HOME/go" ]; then
-            if ask_yes_no "Remove ~/go directory (Go workspace)?"; then
-                rm -rf "$HOME/go"
-                echo "✓ Removed ~/go directory"
-            fi
-        fi
-    else
-        echo "○ Keeping Go"
-    fi
-else
-    echo "○ Go not installed"
-fi
-
-# 7. Remove uv (optional)
-echo ""
-echo "[7/7] Remove uv?"
+echo "[6/6] Remove uv?"
 
 if command -v uv &> /dev/null; then
     echo "uv is installed. It may be used by other Python projects."

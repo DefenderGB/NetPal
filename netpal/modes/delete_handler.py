@@ -7,7 +7,7 @@ from .base_handler import ModeHandler
 
 
 class DeleteHandler(ModeHandler):
-    """Handles ``netpal delete --project <name>`` — delete a project."""
+    """Handles ``netpal delete <name>`` — delete a project."""
 
     def __init__(self, netpal_instance, args):
         super().__init__(netpal_instance)
@@ -19,26 +19,24 @@ class DeleteHandler(ModeHandler):
         print(f"\n{Fore.CYAN}  ▸ Delete Project{Style.RESET_ALL}\n")
 
     def validate_prerequisites(self) -> bool:
-        project_name = getattr(self.args, 'project_name', None)
-        if not project_name:
-            print(f"{Fore.RED}[ERROR] --project is required.{Style.RESET_ALL}")
+        identifier = getattr(self.args, 'name', None)
+        if not identifier:
+            # No identifier provided — show project list and exit
+            from ..modes.list_handler import ListHandler
+            ListHandler(self.netpal, self.args).execute()
             return False
         return True
 
     def prepare_context(self):
-        from ..utils.persistence.file_utils import list_registered_projects
+        from ..utils.persistence.project_utils import resolve_project_by_identifier
         from ..models.project import Project
 
-        project_name = self.args.project_name
-        projects = list_registered_projects()
-        match = None
-        for p in projects:
-            if p.get("name", "").lower() == project_name.lower():
-                match = p
-                break
+        identifier = self.args.name
+        match = resolve_project_by_identifier(identifier)
 
         if not match:
-            print(f"{Fore.RED}[ERROR] No project found with name: {project_name}{Style.RESET_ALL}")
+            print(f"{Fore.RED}[ERROR] No project found matching: {identifier}{Style.RESET_ALL}")
+            print(f"{Fore.YELLOW}Run 'netpal list' to see available projects.{Style.RESET_ALL}")
             return None
 
         # Load the project to show resource counts
@@ -56,19 +54,22 @@ class DeleteHandler(ModeHandler):
         project = context["project"]
         project_id = match.get("id", "")
         name = match.get("name", "")
+        ext_id = match.get("external_id", "") or "—"
 
         # Show what will be deleted
         if project:
             svc_count = sum(len(h.services) for h in project.hosts)
-            print(f"  Project:  {Fore.WHITE}{name}{Style.RESET_ALL}")
-            print(f"  ID:       {project_id[:8]}…")
-            print(f"  Assets:   {len(project.assets)}")
-            print(f"  Hosts:    {len(project.hosts)}")
-            print(f"  Services: {svc_count}")
-            print(f"  Findings: {len(project.findings)}")
+            print(f"  Project:     {Fore.WHITE}{name}{Style.RESET_ALL}")
+            print(f"  ID:          {project_id}")
+            print(f"  External ID: {ext_id}")
+            print(f"  Assets:      {len(project.assets)}")
+            print(f"  Hosts:       {len(project.hosts)}")
+            print(f"  Services:    {svc_count}")
+            print(f"  Findings:    {len(project.findings)}")
         else:
-            print(f"  Project:  {Fore.WHITE}{name}{Style.RESET_ALL}")
-            print(f"  ID:       {project_id[:8]}…")
+            print(f"  Project:     {Fore.WHITE}{name}{Style.RESET_ALL}")
+            print(f"  ID:          {project_id}")
+            print(f"  External ID: {ext_id}")
 
         print()
 

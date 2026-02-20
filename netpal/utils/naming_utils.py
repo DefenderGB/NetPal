@@ -1,11 +1,34 @@
 """Naming and sanitization utilities.
 
-This module provides functions for sanitizing strings for filesystem use
-and cleaning up AI-generated text responses, eliminating 13+ duplicate
-sanitization blocks across the codebase.
+This module provides functions for sanitizing strings for filesystem use,
+cleaning up AI-generated text responses, and generating project identifiers.
 """
+import random
 import re
+import string
+from datetime import datetime, timezone
 from typing import Optional
+
+
+def generate_project_id() -> str:
+    """Generate a project ID in the format ``NETP-YYMM-XXXX``.
+
+    The identifier encodes the current year (last two digits) and month,
+    followed by four random uppercase ASCII letters.
+
+    Returns:
+        A string like ``NETP-2602-ABCD``.
+
+    Example:
+        >>> # Called in February 2026
+        >>> generate_project_id()  # doctest: +SKIP
+        'NETP-2602-XKQM'
+    """
+    now = datetime.now(timezone.utc)
+    yy = now.strftime("%y")       # last two digits of year
+    mm = now.strftime("%m")       # zero-padded month
+    suffix = "".join(random.choices(string.ascii_uppercase, k=4))
+    return f"NETP-{yy}{mm}-{suffix}"
 
 
 def sanitize_for_filename(

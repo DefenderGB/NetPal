@@ -58,7 +58,25 @@ def run_ai_analysis(ai_analyzer, project, config, progress_callback=None):
         return None
 
 
-def run_ai_enhancement(ai_analyzer, project):
+def _default_enhance_progress(event_type, data):
+    """Default progress callback for AI enhancement — prints to stdout."""
+    if event_type == "finding_start":
+        print(
+            f"{Fore.CYAN}[{data['index']}/{data['total']}] "
+            f"Enhancing: {data['name']}{Style.RESET_ALL}"
+        )
+    elif event_type == "finding_complete":
+        print(f"  {Fore.GREEN}✓ Enhanced all fields{Style.RESET_ALL}\n")
+    elif event_type == "finding_error":
+        print(f"  {Fore.RED}✗ Enhancement failed: {data['error']}{Style.RESET_ALL}\n")
+    elif event_type == "summary":
+        print(f"{Fore.GREEN}[SUCCESS] All findings enhanced successfully{Style.RESET_ALL}")
+        print(f"\n{Fore.CYAN}Enhanced findings by severity:{Style.RESET_ALL}")
+        for sev, count in data["severity_counts"].items():
+            print(f"  {sev}: {count}")
+
+
+def run_ai_enhancement(ai_analyzer, project, progress_callback=None):
     """
     Enhance existing findings using detailed AI prompts.
     
@@ -68,24 +86,30 @@ def run_ai_enhancement(ai_analyzer, project):
     Args:
         ai_analyzer: AIAnalyzer instance (must have .enhancer attribute)
         project: Project object
+        progress_callback: Optional ``callback(event_type, data)`` for
+            progress updates.  Event types: ``finding_start``,
+            ``finding_complete``, ``finding_error``, ``summary``.
+            Defaults to stdout printing when *None*.
         
     Returns:
         True if successful, False otherwise
     """
     if not project.findings:
-        print(f"{Fore.YELLOW}[INFO] No findings to enhance{Style.RESET_ALL}")
         return False
     
     if not ai_analyzer.enhancer:
-        print(f"{Fore.RED}[ERROR] AI enhancer not available — check AI configuration{Style.RESET_ALL}")
         return False
-    
-    print(f"{Fore.GREEN}[INFO] Enhancing {len(project.findings)} finding(s) with detailed AI analysis...{Style.RESET_ALL}")
-    print(f"{Fore.YELLOW}[INFO] Using optimised single-call enhancement (1 AI call per finding){Style.RESET_ALL}\n")
+
+    if progress_callback is None:
+        progress_callback = _default_enhance_progress
+
+    total = len(project.findings)
     
     # Enhance each finding using FindingEnhancer
     for idx, finding in enumerate(project.findings, 1):
-        print(f"{Fore.CYAN}[{idx}/{len(project.findings)}] Enhancing: {finding.name}{Style.RESET_ALL}")
+        progress_callback("finding_start", {
+            "index": idx, "total": total, "name": finding.name,
+        })
         
         # Build finding dict for the enhancer
         host = project.get_host(finding.host_id) if finding.host_id else None
@@ -116,24 +140,30 @@ def run_ai_enhancement(ai_analyzer, project):
             if enhanced.get('cwe') and not finding.cwe:
                 finding.cwe = enhanced['cwe']
             
-            print(f"  {Fore.GREEN}✓ Enhanced all fields{Style.RESET_ALL}")
+            progress_callback("finding_complete", {
+                "index": idx, "total": total, "name": finding.name,
+            })
         except Exception as e:
-            print(f"  {Fore.RED}✗ Enhancement failed: {e}{Style.RESET_ALL}")
-        
-        print()
+            progress_callback("finding_error", {
+                "index": idx, "total": total, "name": finding.name,
+                "error": str(e),
+            })
     
-    print(f"{Fore.GREEN}[SUCCESS] All findings enhanced successfully{Style.RESET_ALL}")
-    
-    # Display summary
+    # Build severity summary
     severity_counts = {}
     for finding in project.findings:
         severity = finding.severity
         severity_counts[severity] = severity_counts.get(severity, 0) + 1
-    
-    print(f"\n{Fore.CYAN}Enhanced findings by severity:{Style.RESET_ALL}")
-    for severity in Severity.ordered():
-        if severity in severity_counts:
-            print(f"  {severity}: {severity_counts[severity]}")
+
+    # Order by severity
+    ordered_counts = {}
+    for sev in Severity.ordered():
+        if sev in severity_counts:
+            ordered_counts[sev] = severity_counts[sev]
+
+    progress_callback("summary", {
+        "total": total, "severity_counts": ordered_counts,
+    })
     
     return True
 

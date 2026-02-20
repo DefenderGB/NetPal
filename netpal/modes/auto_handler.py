@@ -79,6 +79,8 @@ class AutoHandler(ModeHandler):
             'asset_name': getattr(self.args, 'asset_name', None),
             'interface': self.args.interface,
             'rerun_autotools': getattr(self.args, 'rerun_autotools', '2'),
+            'external_id': getattr(self.args, 'external_id', '') or '',
+            'verbose': getattr(self.args, 'verbose', False),
         }
 
     def execute_workflow(self, context):
@@ -88,14 +90,12 @@ class AutoHandler(ModeHandler):
         )
         from ..utils.config_loader import ConfigLoader
         from ..utils.persistence.project_persistence import (
-            save_project_to_file, save_findings_to_file, sync_to_s3_if_enabled,
+            save_project_to_file, sync_to_s3_if_enabled,
         )
-        from ..utils.persistence.project_utils import load_or_create_project
         from ..utils.asset_factory import AssetFactory
         from ..utils.scanning.recon_executor import execute_recon_with_tools
         from ..utils.scanning.scan_helpers import run_discovery_phase
         from ..services.nmap.scanner import NmapScanner
-        from ..services.tool_runner import ToolRunner
 
         # ── Step 1: Project ────────────────────────────────────────────
         project_name = context['project_name']
@@ -122,14 +122,15 @@ class AutoHandler(ModeHandler):
                     return False
             else:
                 # Create new project with the given name
+                ext_id = context.get('external_id', '')
                 print(f"{Fore.CYAN}[AUTO] Creating project: {project_name}{Style.RESET_ALL}")
-                project = Project(name=project_name, cloud_sync=False)
+                project = Project(name=project_name, external_id=ext_id, cloud_sync=False)
                 save_project_to_file(project, self.aws_sync)
                 register_project(
                     project_id=project.project_id,
                     project_name=project.name,
                     updated_utc_ts=project.modified_utc_ts,
-                    external_id='',
+                    external_id=ext_id,
                     cloud_sync=False,
                     aws_sync=self.aws_sync,
                 )
@@ -144,15 +145,16 @@ class AutoHandler(ModeHandler):
                     break
                 counter += 1
 
+            ext_id = context.get('external_id', '')
             project_name = candidate
             print(f"{Fore.CYAN}[AUTO] Creating project: {project_name}{Style.RESET_ALL}")
-            project = Project(name=project_name, cloud_sync=False)
+            project = Project(name=project_name, external_id=ext_id, cloud_sync=False)
             save_project_to_file(project, self.aws_sync)
             register_project(
                 project_id=project.project_id,
                 project_name=project.name,
                 updated_utc_ts=project.modified_utc_ts,
-                external_id='',
+                external_id=ext_id,
                 cloud_sync=False,
                 aws_sync=self.aws_sync,
             )
@@ -163,7 +165,8 @@ class AutoHandler(ModeHandler):
         self.netpal.project = project
         self.netpal.config = self.config
 
-        print(f"{Fore.GREEN}[AUTO] Active project: {project.name} (ID: {project.project_id[:8]}…){Style.RESET_ALL}\n")
+        ext_id = project.external_id or "—"
+        print(f"{Fore.GREEN}[AUTO] Active project: {project.name} (ID: {project.project_id} | Ext ID: {ext_id}){Style.RESET_ALL}\n")
 
         # ── Step 2: Asset(s) ───────────────────────────────────────────
         cidr = context['range']
@@ -236,7 +239,7 @@ class AutoHandler(ModeHandler):
 
             hosts = run_discovery_phase(
                 scanner, asset, project, self.config, speed=None,
-                output_callback=output_callback,
+                output_callback=output_callback, verbose=context['verbose'],
             )
 
             if hosts:
@@ -258,21 +261,25 @@ class AutoHandler(ModeHandler):
             execute_recon_with_tools(
                 self.netpal, asset, "__ALL_HOSTS__",
                 interface, 'top1000', '',
-                speed=None, skip_discovery=True, verbose=False,
+                speed=None, skip_discovery=True, verbose=context['verbose'],
                 rerun_autotools=context['rerun_autotools'],
             )
 
-            # ── Phase 3: NetSec ────────────────────────────────────────
-            print(f"\n{Fore.CYAN}{'─' * 60}{Style.RESET_ALL}")
-            print(f"{Fore.CYAN}  ▸ Phase 3 — NetSec Known Ports Scan [{asset_label}]{Style.RESET_ALL}")
-            print(f"{Fore.CYAN}{'─' * 60}{Style.RESET_ALL}\n")
+            # ── Phase 3: NetSec (skipped on VPN tunnel interfaces) ────
+            is_tunnel = interface.startswith('utun') or interface.startswith('tun')
+            if is_tunnel:
+                print(f"\n{Fore.YELLOW}[AUTO] Skipping NetSec phase — tunnel interface ({interface}) detected{Style.RESET_ALL}\n")
+            else:
+                print(f"\n{Fore.CYAN}{'─' * 60}{Style.RESET_ALL}")
+                print(f"{Fore.CYAN}  ▸ Phase 3 — NetSec Known Ports Scan [{asset_label}]{Style.RESET_ALL}")
+                print(f"{Fore.CYAN}{'─' * 60}{Style.RESET_ALL}\n")
 
-            execute_recon_with_tools(
-                self.netpal, asset, "__ALL_HOSTS__",
-                interface, 'netsec_known', '',
-                speed=None, skip_discovery=True, verbose=False,
-                rerun_autotools=context['rerun_autotools'],
-            )
+                execute_recon_with_tools(
+                    self.netpal, asset, "__ALL_HOSTS__",
+                    interface, 'netsec_known', '',
+                    speed=None, skip_discovery=True, verbose=context['verbose'],
+                    rerun_autotools=context['rerun_autotools'],
+                )
 
         if not any_hosts:
             print(f"\n{Fore.YELLOW}[AUTO] No hosts discovered across any asset. Pipeline stopping.{Style.RESET_ALL}")
@@ -283,7 +290,8 @@ class AutoHandler(ModeHandler):
         print(f"{Fore.CYAN}  ▸ Results — Discovered Hosts & Services{Style.RESET_ALL}")
         print(f"{Fore.CYAN}{'─' * 60}{Style.RESET_ALL}\n")
 
-        self._display_hosts(project)
+        from ..utils.display.display_utils import display_hosts_detail
+        display_hosts_detail(project.hosts)
 
         return True
 
@@ -323,91 +331,3 @@ class AutoHandler(ModeHandler):
             ],
         )
 
-    # ── Helpers ────────────────────────────────────────────────────────
-
-    @staticmethod
-    def _display_hosts(project):
-        """Render hosts output inline (mirrors HostsHandler.execute_workflow)."""
-        from ..utils.persistence.file_utils import resolve_scan_results_path
-
-        hosts = project.hosts
-        if not hosts:
-            print(f"  {Fore.YELLOW}No hosts discovered.{Style.RESET_ALL}")
-            return
-
-        total_services = sum(len(h.services) for h in hosts)
-        total_proofs = sum(
-            len(p) for h in hosts for s in h.services for p in [s.proofs]
-        )
-        print(
-            f"  {Fore.WHITE}{len(hosts)}{Style.RESET_ALL} host(s)  "
-            f"{Fore.WHITE}{total_services}{Style.RESET_ALL} service(s)  "
-            f"{Fore.WHITE}{total_proofs}{Style.RESET_ALL} evidence file(s)\n"
-        )
-
-        width = 72
-
-        for host in sorted(hosts, key=lambda h: h.ip):
-            hostname_part = f"  {Fore.LIGHTBLACK_EX}({host.hostname}){Style.RESET_ALL}" if host.hostname else ""
-            os_part = f"  {Fore.LIGHTBLACK_EX}OS: {host.os}{Style.RESET_ALL}" if host.os else ""
-
-            print(f"{Fore.CYAN}╭{'─' * width}╮{Style.RESET_ALL}")
-            print(
-                f"{Fore.CYAN}│{Style.RESET_ALL}  "
-                f"{Fore.WHITE}{host.ip}{Style.RESET_ALL}"
-                f"{hostname_part}{os_part}"
-            )
-            finding_count = len(host.findings)
-            if finding_count:
-                print(
-                    f"{Fore.CYAN}│{Style.RESET_ALL}  "
-                    f"{Fore.YELLOW}{finding_count} finding(s){Style.RESET_ALL}"
-                )
-            print(f"{Fore.CYAN}├{'─' * width}┤{Style.RESET_ALL}")
-
-            if not host.services:
-                print(
-                    f"{Fore.CYAN}│{Style.RESET_ALL}  "
-                    f"{Fore.LIGHTBLACK_EX}No open ports detected{Style.RESET_ALL}"
-                )
-            else:
-                for i, svc in enumerate(sorted(host.services, key=lambda s: s.port)):
-                    ver = f" {svc.service_version}" if svc.service_version else ""
-                    extra = f" ({svc.extrainfo})" if svc.extrainfo else ""
-                    print(
-                        f"{Fore.CYAN}│{Style.RESET_ALL}  "
-                        f"{Fore.GREEN}{svc.port}/{svc.protocol}{Style.RESET_ALL}  "
-                        f"{Fore.WHITE}{svc.service_name}{Style.RESET_ALL}"
-                        f"{Fore.LIGHTBLACK_EX}{ver}{extra}{Style.RESET_ALL}"
-                    )
-
-                    if svc.proofs:
-                        for proof in svc.proofs:
-                            result_file = proof.get("result_file", "")
-                            screenshot = proof.get("screenshot_file", "")
-                            ptype = proof.get("type", "unknown")
-
-                            if result_file:
-                                abs_path = resolve_scan_results_path(result_file)
-                                print(
-                                    f"{Fore.CYAN}│{Style.RESET_ALL}      "
-                                    f"{Fore.LIGHTBLACK_EX}{ptype}:{Style.RESET_ALL} "
-                                    f"{Fore.LIGHTBLACK_EX}{abs_path}{Style.RESET_ALL}"
-                                )
-                            if screenshot:
-                                abs_ss = resolve_scan_results_path(screenshot)
-                                print(
-                                    f"{Fore.CYAN}│{Style.RESET_ALL}      "
-                                    f"{Fore.LIGHTBLACK_EX}screenshot:{Style.RESET_ALL} "
-                                    f"{Fore.LIGHTBLACK_EX}{abs_ss}{Style.RESET_ALL}"
-                                )
-                    else:
-                        print(
-                            f"{Fore.CYAN}│{Style.RESET_ALL}      "
-                            f"{Fore.LIGHTBLACK_EX}(no evidence){Style.RESET_ALL}"
-                        )
-
-                    if i < len(host.services) - 1:
-                        print(f"{Fore.CYAN}│{Style.RESET_ALL}")
-
-            print(f"{Fore.CYAN}╰{'─' * width}╯{Style.RESET_ALL}\n")

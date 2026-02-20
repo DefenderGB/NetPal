@@ -87,7 +87,8 @@ class NmapScriptRunner(BaseToolRunner):
         # Add user-agent for nmap HTTP scripts
         user_agent = self._get_user_agent()
         if user_agent and 'nmap' in command.lower():
-            script_args = f'--script-args http.useragent="{user_agent}"'
+            safe_ua = user_agent.replace('"', '\\"')
+            script_args = f"""--script-args 'http.useragent="{safe_ua}"'"""
             command = command.replace('nmap ', f'nmap {script_args} ', 1)
         
         # Prepend sudo for nmap commands (nmap requires root for SYN scans)

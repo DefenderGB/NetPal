@@ -93,6 +93,52 @@ def sync_to_s3_if_enabled(aws_sync, project):
                 log.warning("Failed to upload merged S3 registry: %s", e)
 
 
+def push_project_to_s3(project, config):
+    """Enable cloud_sync on the project and sync it to S3.
+
+    This is the shared, UI-agnostic S3 push logic used by both
+    the CLI ``PushHandler`` and the TUI ``ProjectsView._run_sync()``.
+
+    Args:
+        project: Project instance to push.
+        config: Configuration dictionary (must contain AWS settings).
+
+    Raises:
+        RuntimeError: If AWS sync is not available or the sync fails.
+    """
+    from .file_utils import register_project
+    from ..aws.aws_utils import create_safe_boto3_session
+    from ...services.aws.sync_engine import AwsSyncService
+
+    aws_profile = config.get("aws_sync_profile", "").strip()
+    aws_account = config.get("aws_sync_account", "").strip()
+    bucket_name = config.get("aws_sync_bucket", f"netpal-{aws_account}")
+
+    # Enable cloud_sync on the project before syncing
+    if not project.cloud_sync:
+        project.cloud_sync = True
+        save_project_to_file(project, None)
+        register_project(
+            project_id=project.project_id,
+            project_name=project.name,
+            updated_utc_ts=project.modified_utc_ts,
+            external_id=project.external_id,
+            cloud_sync=True,
+            aws_sync=None,
+        )
+
+    session = create_safe_boto3_session(aws_profile)
+    region = session.region_name or "us-west-2"
+
+    aws_sync = AwsSyncService(
+        profile_name=aws_profile,
+        region=region,
+        bucket_name=bucket_name,
+    )
+
+    aws_sync.sync_at_startup(project.name)
+
+
 class ProjectPersistence:
     """Handles project and findings save/sync operations.
     

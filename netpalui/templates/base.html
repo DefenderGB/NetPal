@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}NetPalUI{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <header>
+        <div class="header-left">
+            <a href="{{ url_for('index') }}" class="logo">🛡️ NetPalUI</a>
+            {% block breadcrumb %}{% endblock %}
+        </div>
+        <div class="header-right">
+            {% if scan_path %}
+            <span class="scan-path-label" title="{{ scan_path }}">📁 {{ scan_path | truncate(40) }}</span>
+            {% endif %}
+            <a href="{{ request.url }}" class="btn btn-sm btn-outline">🔄 Refresh</a>
+        </div>
+    </header>
+    <main>
+        {% block content %}{% endblock %}
+    </main>
+
+    {# --- Lightbox image viewer --- #}
+    <div id="lightbox" class="lightbox">
+        <button id="lightbox-close" class="lightbox-close" title="Close">✕</button>
+        <div id="lightbox-backdrop" class="lightbox-backdrop"></div>
+        <div id="lightbox-scroll" class="lightbox-scroll">
+            <img id="lightbox-img" src="" alt="Full size preview">
+        </div>
+    </div>
+
+    {# --- Floating back-to-top button --- #}
+    <button id="back-to-top" class="back-to-top" title="Take me to the top">⬆ Top</button>
+    <script>
+    (function() {
+        // Back to top
+        const btn = document.getElementById('back-to-top');
+        window.addEventListener('scroll', function() {
+            btn.classList.toggle('visible', window.scrollY > 300);
+        });
+        btn.addEventListener('click', function() {
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        });
+
+        // Lightbox
+        const lightbox = document.getElementById('lightbox');
+        const lightboxImg = document.getElementById('lightbox-img');
+        const lightboxClose = document.getElementById('lightbox-close');
+        const lightboxBackdrop = document.getElementById('lightbox-backdrop');
+        const lightboxScroll = document.getElementById('lightbox-scroll');
+
+        function openLightbox(src) {
+            lightboxImg.src = src;
+            lightboxImg.style.width = '';
+            lightbox.classList.add('active');
+            lightbox.classList.remove('zoomed');
+        }
+        function closeLightbox() {
+            lightbox.classList.remove('active', 'zoomed');
+            lightboxImg.style.width = '';
+            lightboxImg.src = '';
+        }
+
+        // Open from screenshot click
+        document.addEventListener('click', function(e) {
+            if (e.target.classList.contains('screenshot-clickable')) {
+                e.preventDefault();
+                openLightbox(e.target.src);
+            }
+        });
+
+        // Close via X button
+        lightboxClose.addEventListener('click', function(e) {
+            e.stopPropagation();
+            closeLightbox();
+        });
+
+        // Close via backdrop click
+        lightboxBackdrop.addEventListener('click', closeLightbox);
+
+        // Toggle zoom on image click
+        lightboxImg.addEventListener('click', function(e) {
+            e.stopPropagation();
+            const isZoomed = lightbox.classList.toggle('zoomed');
+            if (isZoomed) {
+                // Stretch to at least 180% of viewport or natural size, whichever is larger
+                const natW = lightboxImg.naturalWidth;
+                const zoomW = Math.max(natW, window.innerWidth * 1.8);
+                lightboxImg.style.width = zoomW + 'px';
+            } else {
+                lightboxImg.style.width = '';
+                lightboxScroll.scrollTop = 0;
+                lightboxScroll.scrollLeft = 0;
+            }
+        });
+
+        // Close on scroll area click (but not on image)
+        lightboxScroll.addEventListener('click', function(e) {
+            if (e.target === lightboxScroll) closeLightbox();
+        });
+
+        // Escape key
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') closeLightbox();
+        });
+
+        // Detect cropped screenshots (image taller than the 300px container)
+        function checkCroppedImages() {
+            document.querySelectorAll('.screenshot-img-wrap').forEach(function(wrap) {
+                const img = wrap.querySelector('img');
+                if (!img) return;
+                function check() {
+                    if (img.naturalHeight > 0) {
+                        // Compare rendered height at full width vs max-height
+                        const ratio = img.naturalHeight / img.naturalWidth;
+                        const renderedH = wrap.offsetWidth * ratio;
+                        if (renderedH > 280) {
+                            wrap.closest('.screenshot-card').classList.add('is-cropped');
+                        }
+                    }
+                }
+                if (img.complete) check();
+                else img.addEventListener('load', check);
+            });
+        }
+        checkCroppedImages();
+        // Re-check when collapsible boxes open (images may load lazily)
+        document.querySelectorAll('.collapsible-header').forEach(function(hdr) {
+            hdr.addEventListener('click', function() {
+                setTimeout(checkCroppedImages, 100);
+            });
+        });
+    })();
+    </script>
+</body>
+</html>

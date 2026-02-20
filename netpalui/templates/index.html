@@ -1,0 +1,136 @@
+{% extends "base.html" %}
+{% block title %}NetPalUI — Projects{% endblock %}
+
+{% block content %}
+<div class="container">
+
+    {% if not scan_path %}
+    {# --- Path prompt --- #}
+    <div class="card card-center">
+        <h2>Welcome to NetPalUI</h2>
+        <p class="text-muted">Provide the path to your NetPal <code>scan_results</code> directory to get started.</p>
+        {% if error %}
+        <div class="alert alert-error">{{ error }}</div>
+        {% endif %}
+        <form method="POST" action="{{ url_for('index') }}" autocomplete="off" id="path-form">
+            <div class="form-group autocomplete-wrap">
+                <input type="text" name="scan_path" id="scan-path-input"
+                       placeholder="/path/to/NetPal/scan_results"
+                       class="input-full" autofocus required>
+                <ul id="path-suggestions" class="suggestions-list"></ul>
+            </div>
+            <div id="path-error" class="alert alert-error" style="display:none;"></div>
+            <button type="submit" class="btn btn-primary">Load Projects</button>
+        </form>
+        <script>
+        (function() {
+            const input = document.getElementById('scan-path-input');
+            const list = document.getElementById('path-suggestions');
+            let debounceTimer = null;
+
+            function fetchSuggestions(query) {
+                if (!query || query.length < 2) { list.innerHTML = ''; return; }
+                fetch('/api/suggest-path?q=' + encodeURIComponent(query))
+                    .then(r => r.json())
+                    .then(items => {
+                        list.innerHTML = '';
+                        items.forEach(item => {
+                            const li = document.createElement('li');
+                            li.textContent = item;
+                            li.addEventListener('mousedown', function(e) {
+                                e.preventDefault();
+                                input.value = item;
+                                list.innerHTML = '';
+                                // Trigger another lookup for the selected directory
+                                fetchSuggestions(item);
+                            });
+                            list.appendChild(li);
+                        });
+                    })
+                    .catch(() => { list.innerHTML = ''; });
+            }
+
+            input.addEventListener('input', function() {
+                clearTimeout(debounceTimer);
+                debounceTimer = setTimeout(() => fetchSuggestions(input.value), 150);
+            });
+
+            input.addEventListener('blur', function() {
+                setTimeout(() => { list.innerHTML = ''; }, 200);
+            });
+
+            input.addEventListener('keydown', function(e) {
+                const items = list.querySelectorAll('li');
+                const active = list.querySelector('li.active');
+                if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    let idx = -1;
+                    items.forEach((li, i) => { if (li.classList.contains('active')) idx = i; });
+                    if (active) active.classList.remove('active');
+                    if (e.key === 'ArrowDown') idx = (idx + 1) % items.length;
+                    else idx = (idx - 1 + items.length) % items.length;
+                    if (items[idx]) items[idx].classList.add('active');
+                } else if (e.key === 'Tab' || e.key === 'Enter') {
+                    if (active) {
+                        e.preventDefault();
+                        input.value = active.textContent;
+                        list.innerHTML = '';
+                        fetchSuggestions(input.value);
+                    }
+                } else if (e.key === 'Escape') {
+                    list.innerHTML = '';
+                }
+            });
+
+            // Client-side validation: path must end with scan_results
+            document.getElementById('path-form').addEventListener('submit', function(e) {
+                const errDiv = document.getElementById('path-error');
+                const val = input.value.replace(/\/+$/, '');
+                if (!val.endsWith('/scan_results') && !val.endsWith('\\scan_results') && val !== 'scan_results') {
+                    e.preventDefault();
+                    errDiv.textContent = "Path must end with a 'scan_results' directory.";
+                    errDiv.style.display = 'block';
+                } else {
+                    errDiv.style.display = 'none';
+                }
+            });
+        })();
+        </script>
+    </div>
+
+    {% else %}
+    {# --- Projects list --- #}
+    <div class="section-header">
+        <h1>Projects</h1>
+        <form method="POST" action="{{ url_for('set_path') }}" class="inline-form">
+            <button type="submit" class="btn btn-sm btn-outline">Change Path</button>
+        </form>
+    </div>
+
+    {% if projects %}
+    <div class="project-grid">
+        {% for p in projects %}
+        <a href="{{ url_for('project_summary', project_id=p.id) }}" class="card card-hover project-card">
+            <div class="project-name">{{ p.name }}</div>
+            <div class="project-id text-muted">{{ p.id }}</div>
+            {% if p.external_id %}
+            <div class="project-ext text-muted">Ext: {{ p.external_id }}</div>
+            {% endif %}
+            <div class="project-meta">
+                <span>{{ p.updated_str }}</span>
+                {% if p.cloud_sync %}
+                <span class="badge badge-cloud">☁️ Sync</span>
+                {% endif %}
+            </div>
+        </a>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="card">
+        <p class="text-muted">No projects found in <code>{{ scan_path }}</code>.</p>
+    </div>
+    {% endif %}
+
+    {% endif %}
+</div>
+{% endblock %}

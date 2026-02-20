@@ -13,73 +13,6 @@ def print_banner():
     print(banner)
 
 
-def display_finding_details(finding, host):
-    """
-    Display detailed information about a finding.
-    
-    Args:
-        finding: Finding object to display
-        host: Host object associated with the finding
-    """
-    # Determine severity color
-    severity_colors = {
-        'Critical': Fore.RED,
-        'High': Fore.RED,
-        'Medium': Fore.YELLOW,
-        'Low': Fore.CYAN,
-        'Info': Fore.LIGHTBLACK_EX
-    }
-    severity_color = severity_colors.get(finding.severity, Fore.WHITE)
-    
-    print(f"\n{Fore.CYAN}  ▸ {Fore.WHITE}{finding.name} {severity_color}[{finding.severity.upper()}]{Style.RESET_ALL}")
-    print(f"{Fore.CYAN}  {'─' * 50}{Style.RESET_ALL}")
-    
-    # Affected host and port
-    print(f"{Fore.CYAN}Affected: {Fore.YELLOW}{host.ip}{Style.RESET_ALL}", end='')
-    if host.hostname:
-        print(f" {Fore.LIGHTBLACK_EX}({host.hostname}){Style.RESET_ALL}", end='')
-    if finding.port:
-        print(f" {Fore.CYAN}Port: {Fore.YELLOW}{finding.port}{Style.RESET_ALL}")
-    else:
-        print()
-    
-    # CVSS score and CWE
-    if finding.cvss or finding.cwe:
-        cvss_str = f"{Fore.CYAN}CVSS: {Fore.YELLOW}{finding.cvss}{Style.RESET_ALL}" if finding.cvss else ""
-        cwe_str = f"{Fore.CYAN}CWE: {Fore.YELLOW}{finding.cwe}{Style.RESET_ALL}" if finding.cwe else ""
-        
-        if cvss_str and cwe_str:
-            print(f"{cvss_str} | {cwe_str}")
-        elif cvss_str:
-            print(cvss_str)
-        elif cwe_str:
-            print(cwe_str)
-    
-    # Description
-    if finding.description:
-        print(f"\n{Fore.GREEN}Description:{Style.RESET_ALL}")
-        print(f"{finding.description}")
-    
-    # Impact
-    if finding.impact:
-        print(f"\n{Fore.GREEN}Impact:{Style.RESET_ALL}")
-        print(f"{finding.impact}")
-    
-    # Remediation
-    if finding.remediation:
-        print(f"\n{Fore.GREEN}Remediation:{Style.RESET_ALL}")
-        print(f"{finding.remediation}")
-    
-    # Proof files
-    if finding.proof_file:
-        print(f"\n{Fore.GREEN}Evidence:{Style.RESET_ALL}")
-        proof_files = finding.proof_file.split(', ')
-        for pf in proof_files:
-            print(f"  {Fore.LIGHTBLACK_EX}{pf}{Style.RESET_ALL}")
-    
-    print(f"{Fore.CYAN}  {'─' * 50}{Style.RESET_ALL}\n")
-
-
 def print_tool_status(tool_name, is_required, is_installed):
     """
     Print status line for a tool check.
@@ -142,7 +75,8 @@ def _box_text_line(text, width, color=None):
     return f"{Fore.CYAN}│{Style.RESET_ALL}{padded}{Fore.CYAN}│{Style.RESET_ALL}"
 
 
-def print_next_command_box(description, command, extra_lines=None):
+def print_next_command_box(description, command, extra_lines=None,
+                           footer_lines=None, width=62, title="Next Step"):
     """Print the 'Next Step' suggestion box.
     
     Uses Fore.CYAN for the box and Fore.GREEN for the command.
@@ -152,11 +86,16 @@ def print_next_command_box(description, command, extra_lines=None):
         command: The CLI command to suggest
         extra_lines: Optional list of (text, color|None) tuples rendered
                      between the description and the command.
+        footer_lines: Optional list of (text, color|None) tuples rendered
+                      after the command line.
+        width: Box width in characters (default 62).
+        title: Box title label (default "Next Step").
     """
-    width = 62
     blank = f"{Fore.CYAN}│{Style.RESET_ALL}{' ' * (width - 2)}{Fore.CYAN}│{Style.RESET_ALL}"
 
-    print(f"\n{Fore.CYAN}╭─ Next Step {'─' * (width - 14)}╮{Style.RESET_ALL}")
+    # Title bar — pad the rule to fill remaining width
+    title_str = f"─ {title} "
+    print(f"\n{Fore.CYAN}╭{title_str}{'─' * (width - len(title_str) - 1)}╮{Style.RESET_ALL}")
     print(_box_text_line(description, width))
 
     # Optional extra descriptive lines (e.g. asset-type choices)
@@ -167,5 +106,126 @@ def print_next_command_box(description, command, extra_lines=None):
 
     print(blank)
     print(_box_text_line(command, width, Fore.GREEN))
+
+    # Optional footer lines rendered after the command
+    if footer_lines:
+        print(blank)
+        for text, color in footer_lines:
+            print(_box_text_line(text, width, color))
+
     print(blank)
     print(f"{Fore.CYAN}╰{'─' * (width - 2)}╯{Style.RESET_ALL}")
+
+
+# ── Host display ───────────────────────────────────────────────────────────
+
+_PROOF_LABELS = {
+    "auto_playwright": "http response",
+    "nuclei": "nuclei",
+    "nmap_script": "nmap script",
+    "http_custom": "http tool",
+}
+
+
+def _proof_label(proof_type: str) -> str:
+    """Return a human-readable label for a proof type."""
+    return _PROOF_LABELS.get(proof_type, proof_type)
+
+
+def display_hosts_detail(hosts):
+    """Render host/service/evidence cards for a list of hosts.
+
+    Shared by ``HostsHandler`` and ``AutoHandler`` to avoid
+    duplicating ~80 lines of display logic.
+
+    Args:
+        hosts: List of Host objects to display.
+
+    Returns:
+        True after rendering.
+    """
+    from ..persistence.file_utils import resolve_scan_results_path
+
+    if not hosts:
+        print(f"  {Fore.YELLOW}No hosts discovered.{Style.RESET_ALL}")
+        return True
+
+    total_services = sum(len(h.services) for h in hosts)
+    total_proofs = sum(
+        len(p) for h in hosts for s in h.services for p in [s.proofs]
+    )
+    print(
+        f"  {Fore.WHITE}{len(hosts)}{Style.RESET_ALL} host(s)  "
+        f"{Fore.WHITE}{total_services}{Style.RESET_ALL} service(s)  "
+        f"{Fore.WHITE}{total_proofs}{Style.RESET_ALL} evidence file(s)\n"
+    )
+
+    width = 72
+
+    for host in sorted(hosts, key=lambda h: h.ip):
+        hostname_part = f"  {Fore.LIGHTBLACK_EX}({host.hostname}){Style.RESET_ALL}" if host.hostname else ""
+        os_part = f"  {Fore.LIGHTBLACK_EX}OS: {host.os}{Style.RESET_ALL}" if host.os else ""
+
+        print(f"{Fore.CYAN}╭{'─' * width}╮{Style.RESET_ALL}")
+        print(
+            f"{Fore.CYAN}│{Style.RESET_ALL}  "
+            f"{Fore.WHITE}{host.ip}{Style.RESET_ALL}"
+            f"{hostname_part}{os_part}"
+        )
+        finding_count = len(host.findings)
+        if finding_count:
+            print(
+                f"{Fore.CYAN}│{Style.RESET_ALL}  "
+                f"{Fore.YELLOW}{finding_count} finding(s){Style.RESET_ALL}"
+            )
+        print(f"{Fore.CYAN}├{'─' * width}┤{Style.RESET_ALL}")
+
+        if not host.services:
+            print(
+                f"{Fore.CYAN}│{Style.RESET_ALL}  "
+                f"{Fore.LIGHTBLACK_EX}No open ports detected{Style.RESET_ALL}"
+            )
+        else:
+            for i, svc in enumerate(sorted(host.services, key=lambda s: s.port)):
+                ver = f" {svc.service_version}" if svc.service_version else ""
+                extra = f" ({svc.extrainfo})" if svc.extrainfo else ""
+                print(
+                    f"{Fore.CYAN}│{Style.RESET_ALL}  "
+                    f"{Fore.GREEN}{svc.port}/{svc.protocol}{Style.RESET_ALL}  "
+                    f"{Fore.WHITE}{svc.service_name}{Style.RESET_ALL}"
+                    f"{Fore.LIGHTBLACK_EX}{ver}{extra}{Style.RESET_ALL}"
+                )
+
+                if svc.proofs:
+                    for proof in svc.proofs:
+                        ptype = proof.get("type", "unknown")
+                        result_file = proof.get("result_file", "")
+                        screenshot = proof.get("screenshot_file", "")
+
+                        if result_file:
+                            abs_path = resolve_scan_results_path(result_file)
+                            label = _proof_label(ptype)
+                            print(
+                                f"{Fore.CYAN}│{Style.RESET_ALL}      "
+                                f"{Fore.LIGHTBLACK_EX}{label}:{Style.RESET_ALL} "
+                                f"{Fore.LIGHTBLACK_EX}{abs_path}{Style.RESET_ALL}"
+                            )
+                        if screenshot:
+                            abs_ss = resolve_scan_results_path(screenshot)
+                            print(
+                                f"{Fore.CYAN}│{Style.RESET_ALL}      "
+                                f"{Fore.LIGHTBLACK_EX}screenshot:{Style.RESET_ALL} "
+                                f"{Fore.LIGHTBLACK_EX}{abs_ss}{Style.RESET_ALL}"
+                            )
+                else:
+                    print(
+                        f"{Fore.CYAN}│{Style.RESET_ALL}      "
+                        f"{Fore.LIGHTBLACK_EX}(no evidence){Style.RESET_ALL}"
+                    )
+
+                if i < len(host.services) - 1:
+                    print(f"{Fore.CYAN}│{Style.RESET_ALL}")
+
+        print(f"{Fore.CYAN}╰{'─' * width}╯{Style.RESET_ALL}\n")
+
+    return True

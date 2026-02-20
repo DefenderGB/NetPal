@@ -15,6 +15,8 @@ def validate_cidr(cidr: str) -> Tuple[bool, str]:
     Returns:
         Tuple of (is_valid, error_message)
     """
+    if '/' not in cidr:
+        return False, "CIDR notation requires a prefix length (e.g. 10.0.0.0/24)"
     try:
         ipaddress.ip_network(cidr, strict=False)
         return True, ""

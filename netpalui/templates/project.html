@@ -1,0 +1,214 @@
+{% extends "base.html" %}
+{% block title %}{{ project.name }} — NetPalUI{% endblock %}
+
+{% block breadcrumb %}
+<nav class="breadcrumb">
+    <span class="sep">›</span>
+    <span>{{ project.name }}</span>
+</nav>
+{% endblock %}
+
+{% block content %}
+<div class="container">
+    <h1>{{ project.name }}</h1>
+    <p class="text-muted">{{ project_id }}{% if project.external_id %} · {{ project.external_id }}{% endif %}</p>
+
+    {# --- Metrics --- #}
+    <div class="metrics-row">
+        <div class="metric-card">
+            <div class="metric-value">{{ host_count }}</div>
+            <div class="metric-label">Hosts</div>
+        </div>
+        <div class="metric-card">
+            <div class="metric-value">{{ service_count }}</div>
+            <div class="metric-label">Services</div>
+        </div>
+        <div class="metric-card">
+            <div class="metric-value">{{ finding_count }}</div>
+            <div class="metric-label">Findings</div>
+        </div>
+    </div>
+
+    {# --- Severity breakdown --- #}
+    {% if severity_counts %}
+    <div class="severity-row">
+        {% for sev, count in severity_counts.items() %}
+        <span class="badge {{ severity_color(sev) }}">{{ sev }}: {{ count }}</span>
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    {# ================================================================= #}
+    {# COLLAPSIBLE HOSTS BOX                                             #}
+    {# ================================================================= #}
+    <div class="collapsible-box">
+        <div class="collapsible-header" onclick="this.parentElement.classList.toggle('open')">
+            <span class="collapsible-icon">▶</span>
+            <h2>🖥️ Hosts ({{ host_count }})</h2>
+        </div>
+        <div class="collapsible-content">
+
+            {# --- Web Screenshots Gallery --- #}
+            {% if screenshots %}
+            <section class="section">
+                <h3>🖼️ Web Screenshots</h3>
+                <div class="screenshot-grid">
+                    {% for ss in screenshots %}
+                    <div class="screenshot-card">
+                        <div class="screenshot-img-wrap">
+                            <img src="{{ url_for('serve_file', filepath=ss.file) }}" alt="Screenshot {{ ss.host_ip }}:{{ ss.port }}" loading="lazy" class="screenshot-clickable">
+                        </div>
+                        <div class="screenshot-cropped">✂ Image Cropped</div>
+                        <div class="screenshot-label">{{ ss.host_ip }}:{{ ss.port }} ({{ ss.service }})</div>
+                        {% if ss.hostname %}
+                        <div class="screenshot-hostname">{{ ss.hostname }}</div>
+                        {% endif %}
+                    </div>
+                    {% endfor %}
+                </div>
+            </section>
+            {% endif %}
+
+            {# --- Host Details --- #}
+            {% for host in hosts %}
+            <section class="section host-section">
+                <h3>🖥️ {{ host.ip }}</h3>
+                {% if host.hostname %}
+                <p class="host-hostname">{{ host.hostname }}</p>
+                {% endif %}
+                {% if host.os %}
+                <p class="text-muted">OS: {{ host.os }}</p>
+                {% endif %}
+
+                {% for svc in host.services %}
+                <div class="service-block">
+                    <h4>
+                        <span class="port-badge">{{ svc.port }}/{{ svc.protocol }}</span>
+                        {{ svc.service_name }}
+                        {% if svc.service_version %}
+                        <span class="text-muted">— {{ svc.service_version }}</span>
+                        {% endif %}
+                    </h4>
+                    {% if svc.extrainfo %}
+                    <p class="text-muted svc-extra">{{ svc.extrainfo }}</p>
+                    {% endif %}
+
+                    {% if svc.proofs %}
+                    <ul class="proof-list">
+                        {% for proof in svc.proofs %}
+                        <li class="proof-item">
+                            <div class="proof-type">📋 {{ proof.type }}</div>
+                            <div class="proof-files">
+                                {% for f in proof.files %}
+                                <div class="proof-file">
+                                    {% if f.type == "image" %}
+                                    <div class="proof-file-name">{{ f.name }}</div>
+                                    <img src="{{ url_for('serve_file', filepath=f.path) }}" alt="{{ f.name }}" class="proof-img" loading="lazy">
+                                    {% elif f.type == "text" %}
+                                    <div class="proof-file-name">{{ f.name }}</div>
+                                    <pre class="proof-text">{{ f.content }}</pre>
+                                    {% elif f.type == "jsonl" %}
+                                    <div class="proof-file-name">{{ f.name }}</div>
+                                    <pre class="proof-text proof-json">{{ f.content }}</pre>
+                                    {% endif %}
+                                </div>
+                                {% endfor %}
+                            </div>
+                        </li>
+                        {% endfor %}
+                    </ul>
+                    {% endif %}
+                </div>
+                {% endfor %}
+            </section>
+            {% endfor %}
+
+        </div>
+    </div>
+
+    {# ================================================================= #}
+    {# COLLAPSIBLE FINDINGS BOX                                          #}
+    {# ================================================================= #}
+    <div class="collapsible-box">
+        <div class="collapsible-header" onclick="this.parentElement.classList.toggle('open')">
+            <span class="collapsible-icon">▶</span>
+            <h2>🔍 Findings ({{ finding_count }})</h2>
+            {% if severity_counts %}
+            <div class="header-badges">
+                {% for sev, count in severity_counts.items() %}
+                <span class="badge {{ severity_color(sev) }}">{{ sev }}: {{ count }}</span>
+                {% endfor %}
+            </div>
+            {% endif %}
+        </div>
+        <div class="collapsible-content">
+
+            {% if findings %}
+            {% for f in findings %}
+            <div class="card finding-card">
+                <div class="finding-header">
+                    <span class="badge {{ severity_color(f.severity) }}">{{ f.severity }}</span>
+                    <h3 class="finding-name">{{ f.name }}</h3>
+                    {% if f.cvss is not none %}
+                    <span class="cvss-badge" title="CVSS Score">CVSS {{ f.cvss }}</span>
+                    {% endif %}
+                </div>
+
+                <div class="finding-meta text-muted">
+                    <span>Host: {{ f.host_ip }}</span>
+                    {% if f.host_hostname %}
+                    <span>Hostname: {{ f.host_hostname }}</span>
+                    {% endif %}
+                    <span>Port: {{ f.port }}</span>
+                    {% if f.cwe %}
+                    <span>CWE: {{ f.cwe }}</span>
+                    {% endif %}
+                </div>
+
+                {% if f.description %}
+                <div class="finding-section">
+                    <h4>Description</h4>
+                    <p>{{ f.description }}</p>
+                </div>
+                {% endif %}
+
+                {% if f.impact %}
+                <div class="finding-section">
+                    <h4>Impact</h4>
+                    <p>{{ f.impact }}</p>
+                </div>
+                {% endif %}
+
+                {% if f.remediation %}
+                <div class="finding-section">
+                    <h4>Remediation</h4>
+                    <div class="remediation-text">{{ f.remediation | replace('\n', '<br>') | safe }}</div>
+                </div>
+                {% endif %}
+
+                {% if f.proof_file %}
+                <div class="finding-section">
+                    <h4>Proof Files</h4>
+                    <div class="proof-file-links">
+                        {% for pf in f.proof_file.split(', ') %}
+                        {% set pf_trimmed = pf.strip() %}
+                        {% if pf_trimmed %}
+                        <a href="{{ url_for('serve_file', filepath=pf_trimmed) }}" target="_blank" class="proof-link">📎 {{ pf_trimmed.split('/')[-1] }}</a>
+                        {% endif %}
+                        {% endfor %}
+                    </div>
+                </div>
+                {% endif %}
+            </div>
+            {% endfor %}
+            {% else %}
+            <div class="card">
+                <p class="text-muted">No findings for this project.</p>
+            </div>
+            {% endif %}
+
+        </div>
+    </div>
+
+</div>
+{% endblock %}

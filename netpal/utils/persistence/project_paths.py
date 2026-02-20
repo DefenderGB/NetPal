@@ -38,7 +38,7 @@ class ProjectPaths:
         """Initialize project paths.
         
         Args:
-            project_id: Project UUID
+            project_id: Project identifier (e.g. ``NETP-2602-ABCD``)
             base_dir: Optional base directory (defaults to scan_results)
         """
         self.project_id = project_id

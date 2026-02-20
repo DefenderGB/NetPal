@@ -1,8 +1,6 @@
 """
 AWS S3 synchronization service package.
 
-Split from the monolithic ``aws_sync.py`` into focused modules:
-
 - :mod:`operations` — primitive S3 upload/download/delete helpers
 - :mod:`registry`   — projects.json registry CRUD
 - :mod:`sync_engine` — bidirectional sync, conflict resolution, pull

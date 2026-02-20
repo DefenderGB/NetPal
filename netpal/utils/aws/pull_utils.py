@@ -84,10 +84,7 @@ def interactive_pull(aws_sync):
         proj_id = proj.get('id', 'Unknown')
         external_id = proj.get('external_id', '')
         
-        # Show shortened ID (first 8 characters)
-        short_id = proj_id[:8] if len(proj_id) > 8 else proj_id
-        
-        display_line = f"{index}. {proj_name} (ID: {short_id})"
+        display_line = f"{index}. {proj_name} (ID: {proj_id})"
         if external_id:
             display_line += f" [Ext: {external_id}]"
         
@@ -101,10 +98,7 @@ def interactive_pull(aws_sync):
         proj_id = proj.get('id', 'Unknown')
         external_id = proj.get('external_id', '')
         
-        # Show shortened ID (first 8 characters)
-        short_id = proj_id[:8] if len(proj_id) > 8 else proj_id
-        
-        display_line = f"{index}. {proj_name} (ID: {short_id})"
+        display_line = f"{index}. {proj_name} (ID: {proj_id})"
         if external_id:
             display_line += f" [Ext: {external_id}]"
         display_line += " (DOWNLOADED)"

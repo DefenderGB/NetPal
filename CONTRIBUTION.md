@@ -10,7 +10,7 @@ This guide covers the project structure and how to extend NetPal.
 
 ### Quick Start (recommended)
 
-The [`install.sh`](install.sh) script handles everything — installs **uv**, external tools (nmap, httpx, nuclei, AWS CLI), creates a Python 3.12 virtual environment, syncs dependencies, and installs NetPal in editable mode:
+The [`install.sh`](install.sh) script handles everything — installs **uv**, external tools (nmap, nuclei, AWS CLI), creates a Python 3.12 virtual environment, syncs dependencies (including Playwright), installs NetPal in editable mode, and downloads the Chromium browser for Playwright:
 
 ```bash
 git clone https://github.com/DefenderGB/NetPal.git
@@ -50,8 +50,8 @@ netpal setup
 | Python 3.12 | Yes | Managed by uv |
 | [uv](https://docs.astral.sh/uv/) | Yes | Installed automatically by `install.sh` |
 | nmap | Yes | Sudo required for SYN scans; `install.sh` offers to configure passwordless sudo |
-| httpx | Yes | ProjectDiscovery HTTP toolkit (requires Go) |
-| Go | Yes | Required to install httpx and nuclei |
+| playwright | Yes | Python dependency; `install.sh` runs `playwright install chromium` automatically |
+| Go | Optional | Required to install nuclei |
 | nuclei | Yes | Vulnerability scanning with templates |
 | AWS CLI | Yes | Only needed for S3 sync |
 
@@ -127,7 +127,7 @@ netpal/
 │   └── tools/                     # Tool runner subsystem
 │       ├── base.py                # Abstract tool runner
 │       ├── http_tool_runner.py    # HTTP-based tools
-│       ├── httpx_runner.py        # httpx integration
+│       ├── playwright_runner.py   # Playwright (headless Chromium) integration
 │       ├── nmap_script_runner.py  # Nmap NSE scripts
 │       ├── nuclei_runner.py       # Nuclei vulnerability scanning
 │       └── tool_orchestrator.py   # Coordinates tool execution

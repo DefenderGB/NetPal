@@ -261,6 +261,9 @@ Only include genuine security concerns. Return an empty array [] if no significa
                             for service in host.services:
                                 if service.port == port:
                                     for proof in service.proofs:
+                                        # Skip proofs with no actionable output
+                                        if not proof.get("output", True):
+                                            continue
                                         result_file = proof.get('result_file')
                                         screenshot_file = proof.get('screenshot_file')
                                         

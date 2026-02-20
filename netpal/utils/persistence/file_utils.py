@@ -73,7 +73,7 @@ def get_project_path(project_id):
     """Get path to project JSON file.
     
     Args:
-        project_id: UUID of the project
+        project_id: Project identifier (e.g. ``NETP-2602-ABCD``)
         
     Returns:
         Path to project JSON file
@@ -86,7 +86,7 @@ def get_findings_path(project_id):
     """Get path to findings JSON file.
     
     Args:
-        project_id: UUID of the project
+        project_id: Project identifier (e.g. ``NETP-2602-ABCD``)
         
     Returns:
         Path to findings JSON file
@@ -99,7 +99,7 @@ def get_scan_results_dir(project_id, asset_identifier=None):
     """Get directory for scan results.
     
     Args:
-        project_id: UUID of the project
+        project_id: Project identifier (e.g. ``NETP-2602-ABCD``)
         asset_identifier: Optional asset identifier for sub-directory
         
     Returns:
@@ -172,7 +172,7 @@ def register_project(project_id, project_name, updated_utc_ts, external_id="", c
     This prevents overwriting other users' projects in collaborative environments.
     
     Args:
-        project_id: UUID of the project
+        project_id: Project identifier (e.g. ``NETP-2602-ABCD``)
         project_name: Name of the project
         updated_utc_ts: Last update timestamp
         external_id: External tracking ID (optional, defaults to empty string)
@@ -290,7 +290,7 @@ def unregister_project(project_id):
     Remove a project from the registry.
     
     Args:
-        project_id: UUID of the project to remove
+        project_id: Project identifier to remove
         
     Returns:
         True if successful
@@ -307,11 +307,13 @@ def list_registered_projects():
     """
     List all registered projects from the registry.
     
+    Projects marked with ``"deleted": true`` are excluded.
+    
     Returns:
         List of project dictionaries with id, name, and updated_utc_ts
     """
     registry = load_projects_registry()
-    return registry.get("projects", [])
+    return [p for p in registry.get("projects", []) if not p.get("deleted")]
 
 
 def delete_project_locally(project_id):
@@ -319,7 +321,7 @@ def delete_project_locally(project_id):
     Delete a specific project locally (files and registry entry).
     
     Args:
-        project_id: UUID of project to delete
+        project_id: Project identifier to delete
     """
     import shutil
     
@@ -394,7 +396,7 @@ def chown_to_user(filepath: str) -> None:
 
 def make_path_relative_to_scan_results(filepath):
     """
-    Convert an absolute filepath to be relative to scan_results/.
+    Convert a filepath to be relative to scan_results/.
     
     This ensures portability - the scan_results folder can be moved
     to different locations without breaking file references.
@@ -406,9 +408,9 @@ def make_path_relative_to_scan_results(filepath):
         Path relative to scan_results/ directory
         
     Examples:
-        /Users/user/NetPal/scan_results/uuid/asset/file.txt -> uuid/asset/file.txt
-        scan_results/uuid/asset/file.txt -> uuid/asset/file.txt
-        uuid/asset/file.txt -> uuid/asset/file.txt (already relative)
+        /Users/user/NetPal/scan_results/NETP-2602-ABCD/asset/file.txt -> NETP-2602-ABCD/asset/file.txt
+        scan_results/NETP-2602-ABCD/asset/file.txt -> NETP-2602-ABCD/asset/file.txt
+        NETP-2602-ABCD/asset/file.txt -> NETP-2602-ABCD/asset/file.txt (already relative)
     """
     if not filepath:
         return filepath
@@ -427,8 +429,10 @@ def make_path_relative_to_scan_results(filepath):
                 relative = path.relative_to(scan_results_base)
                 return str(relative)
         except ValueError:
-            # Path is not relative to scan_results
+            # Path is not relative to scan_results — return as-is
             pass
+        # Absolute path outside scan_results — return as-is
+        return str(filepath)
     
     # If path starts with "scan_results/", remove that prefix
     filepath_str = str(filepath)
@@ -437,7 +441,7 @@ def make_path_relative_to_scan_results(filepath):
     if filepath_str.startswith("scan_results\\"):  # Windows
         return filepath_str[len("scan_results\\"):]
     
-    # Return as-is if already relative
+    # Already relative (e.g. "NETP-2602-ABCD/file.txt") — return as-is
     return filepath_str
 
 
@@ -449,7 +453,7 @@ def resolve_scan_results_path(relative_path: str) -> str:
     can be used directly with ``open()`` or ``nmap -iL``.
 
     Args:
-        relative_path: Path relative to ``scan_results/`` (e.g. ``uuid/file.txt``)
+        relative_path: Path relative to ``scan_results/`` (e.g. ``NETP-2602-ABCD/file.txt``)
 
     Returns:
         Absolute path to the file.

@@ -3,7 +3,6 @@
 Usage:
     netpal init "ProjectName" "Optional description"
 """
-import time
 from colorama import Fore, Style
 from .base_handler import ModeHandler
 
@@ -41,12 +40,9 @@ class InitHandler(ModeHandler):
         return {'name': name, 'description': description.strip(), 'external_id': external_id.strip()}
 
     def execute_workflow(self, context: dict):
-        from ..models.project import Project
-        from ..utils.persistence.file_utils import (
-            register_project, list_registered_projects,
-        )
+        from ..utils.persistence.file_utils import list_registered_projects
         from ..utils.config_loader import ConfigLoader
-        from ..utils.persistence.project_persistence import save_project_to_file
+        from ..utils.persistence.project_utils import create_project_headless
 
         name = context['name']
         description = context['description']
@@ -57,7 +53,7 @@ class InitHandler(ModeHandler):
             if proj.get('name', '').lower() == name.lower():
                 print(
                     f"{Fore.YELLOW}[WARNING] A project named '{proj['name']}' "
-                    f"already exists (ID: {proj['id'][:8]}…).{Style.RESET_ALL}"
+                    f"already exists (ID: {proj['id']}).{Style.RESET_ALL}"
                 )
                 response = input(
                     f"{Fore.CYAN}Switch to it instead? (Y/N) [Y]: {Style.RESET_ALL}"
@@ -92,36 +88,25 @@ class InitHandler(ModeHandler):
             cloud_sync = False
 
         # Use --external-id from CLI if provided, else fall back to config
-        external_id = context.get('external_id', '') or (self.config or {}).get('external_id', '')
+        external_id = context.get('external_id', '')
 
-        # Create new project
-        project = Project(name=name, cloud_sync=cloud_sync)
-        if external_id:
-            project.external_id = external_id
-
-        # Save project data
-        save_project_to_file(project, self.aws_sync)
-
-        # Register in projects.json
-        register_project(
-            project_id=project.project_id,
-            project_name=project.name,
-            updated_utc_ts=project.modified_utc_ts,
-            external_id=project.external_id,
-            cloud_sync=project.cloud_sync,
+        # Create project via shared headless helper
+        project = create_project_headless(
+            name=name,
+            config=self.config,
+            description=description,
+            external_id=external_id,
+            cloud_sync=cloud_sync,
             aws_sync=self.aws_sync,
         )
-
-        # Update config.json to point to this project
-        ConfigLoader.update_config_project_name(name)
 
         # Display summary
         print(f"{Fore.GREEN}[SUCCESS] Project created!{Style.RESET_ALL}\n")
         print(f"  Name        : {name}")
         if description:
             print(f"  Description : {description}")
-        if external_id:
-            print(f"  External ID : {external_id}")
+        if project.external_id:
+            print(f"  External ID : {project.external_id}")
         print(f"  Project ID  : {project.project_id}")
         print(f"  Cloud Sync  : {'Enabled' if cloud_sync else 'Disabled'}")
         print()
@@ -141,11 +126,18 @@ class InitHandler(ModeHandler):
 
         print_next_command_box(
             "Add scan targets to this project",
-            "netpal assets <type> --name <NAME> ...",
+            'netpal assets <asset_type> --name <asset_name> ...',
             extra_lines=[
-                ("Asset types:", None),
-                ("  network  — CIDR range   (--range)", Fore.GREEN),
-                ("  list     — host list    (--targets / --file)", Fore.GREEN),
-                ("  single   — single host  (--target)", Fore.GREEN),
+                ("Asset Types:", None),
+                ('  network - needs CIDR range (--range "10.0.0.0/24")', Fore.GREEN),
+                ('  list    - needs host list or comma separated', Fore.GREEN),
+                ('            (--targets "10.0.0.1,10.0.0.2" / --file "sample.txt")', Fore.GREEN),
+                ('  single  - needs single host (--target "example.com")', Fore.GREEN),
             ],
+            footer_lines=[
+                ('OR run an auto recon:', None),
+                ('netpal auto -p "Project Name" -r "10.0.0.0/24" -i "eth0"', Fore.GREEN),
+            ],
+            width=72,
+            title="Next Steps",
         )
