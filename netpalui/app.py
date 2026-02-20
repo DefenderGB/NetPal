@@ -4,7 +4,9 @@
 import json
 import os
 import sys
+from typing import Optional
 from datetime import datetime, timezone
+from pathlib import Path
 
 from flask import (
     Flask,
@@ -351,16 +353,14 @@ def serve_file(filepath):
 
 # Resolved scan_results path (CLI arg or CWD auto-detect), injected into
 # the Flask session on the first request so the user doesn't have to type it.
-_default_scan_path: str | None = None
+_default_scan_path: Optional[str] = None
 
 
-def _detect_scan_path() -> str | None:
+def _detect_scan_path() -> Optional[str]:
     """Return a valid scan_results path from CWD, or None."""
-    candidate = os.path.join(os.getcwd(), "scan_results")
-    if os.path.isdir(candidate) and os.path.isfile(
-        os.path.join(candidate, "projects.json")
-    ):
-        return candidate
+    candidate = Path.cwd() / "scan_results"
+    if candidate.is_dir() and (candidate / "projects.json").is_file():
+        return str(candidate)
     return None
 
 
