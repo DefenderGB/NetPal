@@ -19,6 +19,16 @@ NetPal is a CLI network pentest automation tool and AI copilot for network penet
 
 ## Installation
 
+### One-Liner Install
+
+```bash
+curl -sSL https://raw.githubusercontent.com/DefenderGB/NetPal/refs/heads/main/install.sh | bash
+```
+
+This clones the repo into `~/tools/NetPal`, installs all dependencies, and sets up the environment.
+
+### Manual Install
+
 ```bash
 git clone https://github.com/DefenderGB/NetPal.git
 cd NetPal
