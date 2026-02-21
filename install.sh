@@ -3,7 +3,36 @@
 # Usage: bash install.sh [no_nuclei]
 #   no_nuclei  — skip nuclei installation (useful when nuclei is installed separately)
 
-set -e
+# ── Check for root user ───────────────────────────────────────────────────
+
+if [ "$(id -u)" -eq 0 ]; then
+    echo "⚠️  WARNING: You are running this script as root."
+    echo "  It is recommended to run as a regular user."
+    read -p "Continue running as root? (y/N): " -n 1 -r
+    echo
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        echo "Exiting. Please run as a regular user."
+        exit 1
+    fi
+fi
+
+# ── Ensure we are in the NetPal directory ─────────────────────────────────
+
+NETPAL_DIR="$HOME/tools/NetPal"
+
+if [[ ! -f "pyproject.toml" ]] || ! grep -q 'name = "netpal"' pyproject.toml 2>/dev/null; then
+    echo "[INFO] Not running from the NetPal project directory."
+    echo "[INFO] Cloning NetPal into ${NETPAL_DIR}..."
+    mkdir -p "$HOME/tools"
+    if [ -d "$NETPAL_DIR" ]; then
+        echo "✓ ${NETPAL_DIR} already exists, pulling latest..."
+        cd "$NETPAL_DIR" && git pull
+    else
+        git clone https://github.com/NetPalHub/NetPal.git "$NETPAL_DIR"
+        cd "$NETPAL_DIR"
+    fi
+    echo "✓ Now running from ${NETPAL_DIR}"
+fi
 
 # ── Parse arguments ────────────────────────────────────────────────────────
 SKIP_NUCLEI=false
