@@ -28,7 +28,7 @@ if [[ ! -f "pyproject.toml" ]] || ! grep -q 'name = "netpal"' pyproject.toml 2>/
         echo "✓ ${NETPAL_DIR} already exists, pulling latest..."
         cd "$NETPAL_DIR" && git pull
     else
-        git clone https://github.com/NetPalHub/NetPal.git "$NETPAL_DIR"
+        git clone https://github.com/DefenderGB/NetPal.git "$NETPAL_DIR"
         cd "$NETPAL_DIR"
     fi
     echo "✓ Now running from ${NETPAL_DIR}"
