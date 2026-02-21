@@ -204,15 +204,36 @@ else
     else
         echo "○ nuclei is not installed (optional but recommended)"
         if [[ "$GO_INSTALLED" == true ]]; then
-            read -p "Install nuclei? (Y/N): " -n 1 -r
-            echo
-            if [[ $REPLY =~ ^[Yy]$ ]]; then
-                go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
-                export PATH=$PATH:$HOME/go/bin
+            # Check Go version >= 1.23 (required by nuclei)
+            GO_VERSION_STR=$(go version | grep -oE 'go[0-9]+\.[0-9]+' | head -1 | sed 's/go//')
+            GO_MAJOR=$(echo "$GO_VERSION_STR" | cut -d. -f1)
+            GO_MINOR=$(echo "$GO_VERSION_STR" | cut -d. -f2)
+            if [[ "$GO_MAJOR" -lt 1 ]] || { [[ "$GO_MAJOR" -eq 1 ]] && [[ "$GO_MINOR" -lt 23 ]]; }; then
+                echo "✗ Go version 1.23 or higher is required to install nuclei (found: go${GO_VERSION_STR})"
+                echo "  Please update Go using one of the following:"
+                if [[ "$OS" == "linux" ]]; then
+                    if command -v apt-get &> /dev/null; then
+                        echo "    sudo apt update && sudo apt upgrade golang-go"
+                    elif command -v yum &> /dev/null; then
+                        echo "    sudo yum -y update golang"
+                    elif command -v dnf &> /dev/null; then
+                        echo "    sudo dnf -y update golang"
+                    fi
+                elif [[ "$OS" == "macos" ]]; then
+                    echo "    brew update && brew upgrade go"
+                fi
+                echo "  Or visit: https://go.dev/doc/install"
+            else
+                read -p "Install nuclei? (Y/N): " -n 1 -r
+                echo
+                if [[ $REPLY =~ ^[Yy]$ ]]; then
+                    go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
+                    export PATH=$PATH:$HOME/go/bin
 
-                if command -v nuclei &> /dev/null; then
-                    echo "✓ nuclei installed: $(nuclei -version 2>&1 | head -1)"
-                    NUCLEI_INSTALLED=true
+                    if command -v nuclei &> /dev/null; then
+                        echo "✓ nuclei installed: $(nuclei -version 2>&1 | head -1)"
+                        NUCLEI_INSTALLED=true
+                    fi
                 fi
             fi
         else
