@@ -36,9 +36,7 @@ class AIEnhanceHandler(ModeHandler):
         from ..utils.persistence.project_persistence import ProjectPersistence
         
         if run_ai_enhancement_phase(self.project, self.config):
-            ProjectPersistence.save_and_sync(
-                self.project, self.aws_sync, save_findings=True
-            )
+            ProjectPersistence.save_and_sync(self.project, save_findings=True)
             
             print(f"\n{Fore.GREEN}[SUCCESS] Enhanced {len(self.project.findings)} finding(s){Style.RESET_ALL}")
             return True

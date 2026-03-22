@@ -82,7 +82,7 @@ def register_asset_tools(mcp):
             raise ValueError(f"Invalid target: {identifier}")
 
         project.add_asset(asset)
-        save_project_to_file(project, nctx.aws_sync)
+        save_project_to_file(project)
 
         return {
             "asset_id": asset.asset_id,
@@ -121,7 +121,7 @@ def register_asset_tools(mcp):
             raise ValueError(f"Asset '{asset_name}' not found in project")
 
         project.remove_asset(asset)
-        save_project_to_file(project, nctx.aws_sync)
+        save_project_to_file(project)
 
         return {
             "asset_name": asset_name,
@@ -165,7 +165,7 @@ def register_asset_tools(mcp):
                 f for f in project.findings if f.finding_id not in orphan_finding_ids
             ]
 
-        save_project_to_file(project, nctx.aws_sync)
+        save_project_to_file(project)
 
         return {
             "orphan_hosts_removed": len(orphans),

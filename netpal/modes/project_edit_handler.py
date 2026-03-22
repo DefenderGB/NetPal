@@ -16,7 +16,6 @@ class ProjectEditHandler(ModeHandler):
         self.config = netpal_instance.config
         self.project = None
         self.scanner = None
-        self.aws_sync = netpal_instance.aws_sync
         self.args = args
 
     # ── Template-method steps ──────────────────────────────────────────
@@ -68,7 +67,6 @@ class ProjectEditHandler(ModeHandler):
         project_id = match['id']
         old_name = match.get('name', '')
         old_ext_id = match.get('external_id', '')
-        old_cloud_sync = match.get('cloud_sync', False)
 
         changed = False
 
@@ -96,16 +94,6 @@ class ProjectEditHandler(ModeHandler):
         if new_ext_id != old_ext_id:
             changed = True
 
-        # ── Ask: Enable Cloud Sync? (only if not already enabled) ───────
-        new_cloud_sync = old_cloud_sync
-        if not old_cloud_sync:
-            cloud_choice = input(
-                f"{Fore.CYAN}Enable Cloud Sync? [y/N]: {Style.RESET_ALL}"
-            ).strip().lower()
-            if cloud_choice == 'y':
-                new_cloud_sync = True
-                changed = True
-
         if not changed:
             print(f"\n{Fore.YELLOW}[INFO] No changes made.{Style.RESET_ALL}")
             return True
@@ -116,7 +104,6 @@ class ProjectEditHandler(ModeHandler):
         if project_data:
             project_data['name'] = new_name
             project_data['external_id'] = new_ext_id
-            project_data['cloud_sync'] = new_cloud_sync
             project_data['modified_utc_ts'] = int(time.time())
             save_json(project_path, project_data, compact=False)
 
@@ -126,7 +113,6 @@ class ProjectEditHandler(ModeHandler):
             if entry.get('id') == project_id:
                 entry['name'] = new_name
                 entry['external_id'] = new_ext_id
-                entry['cloud_sync'] = new_cloud_sync
                 entry['updated_utc_ts'] = int(time.time())
                 break
         save_projects_registry(registry)
@@ -136,28 +122,6 @@ class ProjectEditHandler(ModeHandler):
             config = ConfigLoader.load_config_json() or {}
             if config.get('project_name', '').lower() == old_name.lower():
                 ConfigLoader.update_config_project_name(new_name)
-
-        # ── S3 sync: upload project file + update S3 registry ───────────
-        if new_cloud_sync and self.aws_sync and self.aws_sync.is_enabled():
-            try:
-                print(f"\n{Fore.CYAN}Syncing changes to S3...{Style.RESET_ALL}")
-
-                # Upload the updated project JSON data file to S3
-                self.aws_sync.upload_project(project_id, new_name)
-
-                # Update the S3 projects.json registry
-                from ..utils.persistence.file_utils import register_project
-                register_project(
-                    project_id,
-                    new_name,
-                    int(time.time()),
-                    new_ext_id,
-                    True,
-                    self.aws_sync,
-                )
-                print(f"{Fore.GREEN}[SUCCESS] Synced changes to S3{Style.RESET_ALL}")
-            except Exception:
-                print(f"{Fore.YELLOW}[WARNING] Could not sync changes to S3.{Style.RESET_ALL}")
 
         # ── Summary ─────────────────────────────────────────────────────
         print(f"\n{Fore.GREEN}[SUCCESS] Project updated:{Style.RESET_ALL}\n")
@@ -170,10 +134,6 @@ class ProjectEditHandler(ModeHandler):
             print(f"  External-ID : {old_ext_id or '(none)'} → {new_ext_id or '(none)'}")
         elif new_ext_id:
             print(f"  External-ID : {new_ext_id}")
-        if new_cloud_sync != old_cloud_sync:
-            print(f"  Cloud Sync  : {old_cloud_sync} → {new_cloud_sync}")
-        else:
-            print(f"  Cloud Sync  : {new_cloud_sync}")
         print()
 
         return True

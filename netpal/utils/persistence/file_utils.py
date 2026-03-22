@@ -136,6 +136,9 @@ def load_projects_registry():
     Returns:
         Dictionary with 'projects' list containing project metadata
     """
+    from .local_cleanup import cleanup_legacy_local_storage
+
+    cleanup_legacy_local_storage(scan_results_dir=Path.cwd() / "scan_results")
     registry_path = get_projects_registry_path()
     registry = load_json(registry_path, {"projects": []})
     
@@ -160,53 +163,20 @@ def save_projects_registry(registry):
     return save_json(registry_path, registry, compact=False)
 
 
-def register_project(project_id, project_name, updated_utc_ts, external_id="", cloud_sync=False, aws_sync=None):
+def register_project(project_id, project_name, updated_utc_ts, external_id=""):
     """
     Register or update a project in the registry.
-    
-    If cloud_sync is enabled and aws_sync service is provided, this will:
-    1. Download the latest projects.json from S3
-    2. Merge the current project into it (not replace)
-    3. Save both locally and to S3
-    
-    This prevents overwriting other users' projects in collaborative environments.
-    
+
     Args:
         project_id: Project identifier (e.g. ``NETP-2602-ABCD``)
         project_name: Name of the project
         updated_utc_ts: Last update timestamp
         external_id: External tracking ID (optional, defaults to empty string)
-        cloud_sync: Whether this project is synced to cloud/S3 (optional, defaults to False)
-        aws_sync: AwsSyncService instance for S3 operations (optional)
-        
+
     Returns:
         True if successful
     """
-    # If cloud sync is enabled and we have an aws_sync service, merge with S3 first
-    if cloud_sync and aws_sync and aws_sync.is_enabled():
-        try:
-            s3_projects_key = "projects.json"
-            scan_results_dir = Path.cwd() / "scan_results"
-            temp_s3_path = str(scan_results_dir / ".projects_s3_temp.json")
-            
-            # Download S3 projects.json if it exists
-            if aws_sync.file_exists_in_s3(s3_projects_key):
-                if aws_sync.download_file(s3_projects_key, temp_s3_path):
-                    # Use S3 version as base
-                    registry = load_json(temp_s3_path, {"projects": []})
-                    os.remove(temp_s3_path)
-                else:
-                    # Couldn't download, use local
-                    registry = load_projects_registry()
-            else:
-                # No S3 version yet, use local
-                registry = load_projects_registry()
-        except Exception as e:
-            log.warning("Could not sync with S3, using local registry: %s", e)
-            registry = load_projects_registry()
-    else:
-        # No cloud sync, just use local
-        registry = load_projects_registry()
+    registry = load_projects_registry()
     
     # Find existing project entry
     existing = None
@@ -221,7 +191,6 @@ def register_project(project_id, project_name, updated_utc_ts, external_id="", c
         "name": project_name,
         "external_id": external_id,
         "updated_utc_ts": updated_utc_ts,
-        "cloud_sync": cloud_sync
     }
     
     if existing is not None:
@@ -234,55 +203,7 @@ def register_project(project_id, project_name, updated_utc_ts, external_id="", c
     # Sort by updated timestamp (newest first)
     registry["projects"].sort(key=lambda x: x.get("updated_utc_ts", 0), reverse=True)
     
-    # Save locally
-    success = save_projects_registry(registry)
-    
-    # If cloud sync enabled, re-download fresh S3 registry, merge, and upload
-    if success and cloud_sync and aws_sync and aws_sync.is_enabled():
-        try:
-            s3_projects_key = "projects.json"
-            scan_results_dir = Path.cwd() / "scan_results"
-            temp_fresh_path = str(scan_results_dir / ".projects_s3_fresh.json")
-
-            # Download the latest S3 registry right before upload
-            fresh_registry = {"projects": []}
-            if aws_sync.file_exists_in_s3(s3_projects_key):
-                if aws_sync.download_file(s3_projects_key, temp_fresh_path):
-                    fresh_registry = load_json(temp_fresh_path, {"projects": []})
-                    try:
-                        os.remove(temp_fresh_path)
-                    except OSError:
-                        pass
-
-            # Merge the current project entry into the fresh S3 registry
-            fresh_projects = fresh_registry.get("projects", [])
-            merged = False
-            for i, proj in enumerate(fresh_projects):
-                if proj.get("id") == project_id:
-                    fresh_projects[i] = project_entry
-                    merged = True
-                    break
-            if not merged:
-                fresh_projects.append(project_entry)
-
-            fresh_registry["projects"] = sorted(
-                fresh_projects,
-                key=lambda x: x.get("updated_utc_ts", 0),
-                reverse=True,
-            )
-
-            # Write merged registry to temp file and upload
-            temp_upload_path = str(scan_results_dir / ".projects_s3_upload.json")
-            save_json(temp_upload_path, fresh_registry, compact=False)
-            aws_sync.upload_file(temp_upload_path, s3_projects_key)
-            try:
-                os.remove(temp_upload_path)
-            except OSError:
-                pass
-        except Exception as e:
-            log.warning("Could not upload projects.json to S3: %s", e)
-    
-    return success
+    return save_projects_registry(registry)
 
 
 def unregister_project(project_id):
@@ -306,14 +227,12 @@ def unregister_project(project_id):
 def list_registered_projects():
     """
     List all registered projects from the registry.
-    
-    Projects marked with ``"deleted": true`` are excluded.
-    
+
     Returns:
         List of project dictionaries with id, name, and updated_utc_ts
     """
     registry = load_projects_registry()
-    return [p for p in registry.get("projects", []) if not p.get("deleted")]
+    return list(registry.get("projects", []))
 
 
 def delete_project_locally(project_id):

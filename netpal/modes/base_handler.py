@@ -17,7 +17,6 @@ class ModeHandler(ABC):
         self.config = netpal_instance.config
         self.project = netpal_instance.project
         self.scanner = netpal_instance.scanner
-        self.aws_sync = netpal_instance.aws_sync
     
     def execute(self) -> int:
         """Execute mode workflow (Template Method).
@@ -41,7 +40,6 @@ class ModeHandler(ABC):
         
         if result:
             self.save_results(result)
-            self.sync_if_enabled()
             self.display_completion(result)
             self.suggest_next_command(result)
         
@@ -107,20 +105,12 @@ class ModeHandler(ABC):
         
         ProjectPersistence.save_and_sync(
             self.project,
-            self.aws_sync,
             save_findings=save_findings
         )
     
     def sync_if_enabled(self):
-        """Sync to S3 if enabled.
-        
-        Default implementation checks cloud_sync flag and syncs.
-        Override for custom sync behavior.
-        """
-        from ..utils.persistence.project_persistence import sync_to_s3_if_enabled
-        
-        if self.project and self.project.cloud_sync:
-            sync_to_s3_if_enabled(self.aws_sync, self.project)
+        """Legacy hook retained for compatibility."""
+        return None
     
     def display_completion(self, result: Any):
         """Display completion message.

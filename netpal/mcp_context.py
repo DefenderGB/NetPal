@@ -1,12 +1,6 @@
-"""
-NetPal MCP Context — replaces the mutable NetPal singleton for MCP usage.
-
-Holds shared configuration and provides factory methods for scanners,
-tool runners, and AWS sync services. Initialised once during MCP server
-lifespan and injected into every tool/resource via FastMCP's Context.
-"""
+"""NetPal MCP Context — shared local-only context for MCP tools/resources."""
 from dataclasses import dataclass, field
-from typing import Optional, Dict, Any
+from typing import Dict, Any
 
 
 @dataclass
@@ -14,7 +8,6 @@ class NetPalContext:
     """Shared context for all MCP tools and resources."""
 
     config: Dict[str, Any] = field(default_factory=dict)
-    aws_sync: Optional[Any] = None  # Optional[AwsSyncService]
     nmap_available: bool = False
     nuclei_available: bool = False
     sudo_available: bool = False
@@ -65,16 +58,3 @@ class NetPalContext:
         """
         from .services.tools.tool_orchestrator import ToolOrchestrator
         return ToolOrchestrator(project_id, self.config)
-
-    def setup_aws_sync(self):
-        """Initialise AWS sync service (best-effort).
-
-        Returns:
-            AwsSyncService or None.
-        """
-        from .utils.aws.aws_utils import setup_aws_sync as _setup
-        try:
-            self.aws_sync = _setup(self.config, auto_sync=False)
-        except Exception:
-            self.aws_sync = None
-        return self.aws_sync

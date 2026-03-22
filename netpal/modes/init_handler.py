@@ -17,7 +17,6 @@ class InitHandler(ModeHandler):
         self.config = netpal_instance.config
         self.project = None
         self.scanner = None
-        self.aws_sync = netpal_instance.aws_sync
         self.args = args
 
     # ── Template-method steps ──────────────────────────────────────────
@@ -70,23 +69,6 @@ class InitHandler(ModeHandler):
                     print(f"{Fore.YELLOW}[INFO] Cancelled.{Style.RESET_ALL}")
                     return False
 
-        # Determine cloud_sync — prompt user only when AWS is properly configured
-        from ..utils.aws.aws_utils import is_aws_sync_available
-
-        if is_aws_sync_available(self.config):
-            cloud_sync_default = (self.config or {}).get('cloud_sync_default', False)
-            default_label = "Y" if cloud_sync_default else "N"
-            response = input(
-                f"{Fore.CYAN}Enable cloud sync for this project? "
-                f"(Y/N) [{default_label}]: {Style.RESET_ALL}"
-            ).strip().upper()
-            if response == '':
-                cloud_sync = cloud_sync_default
-            else:
-                cloud_sync = response == 'Y'
-        else:
-            cloud_sync = False
-
         # Use --external-id from CLI if provided, else fall back to config
         external_id = context.get('external_id', '')
 
@@ -96,8 +78,6 @@ class InitHandler(ModeHandler):
             config=self.config,
             description=description,
             external_id=external_id,
-            cloud_sync=cloud_sync,
-            aws_sync=self.aws_sync,
         )
 
         # Display summary
@@ -108,7 +88,6 @@ class InitHandler(ModeHandler):
         if project.external_id:
             print(f"  External ID : {project.external_id}")
         print(f"  Project ID  : {project.project_id}")
-        print(f"  Cloud Sync  : {'Enabled' if cloud_sync else 'Disabled'}")
         print()
 
         return True

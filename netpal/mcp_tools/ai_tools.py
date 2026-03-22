@@ -57,7 +57,7 @@ def register_ai_tools(mcp):
         if model:
             ai_type = config.get("ai_type", "")
             model_keys = {
-                "bedrock": "ai_aws_model",
+                "aws": "ai_aws_model",
                 "anthropic": "ai_athropic_model",
                 "openai": "ai_openai_model",
                 "gemini": "ai_gemini_model",
@@ -68,12 +68,12 @@ def register_ai_tools(mcp):
             if key:
                 config[key] = model
 
-        ai_findings = run_ai_reporting_phase(project, config, nctx.aws_sync)
+        ai_findings = run_ai_reporting_phase(project, config)
 
         if ai_findings:
             for finding in ai_findings:
                 project.add_finding(finding)
-            ProjectPersistence.save_and_sync(project, nctx.aws_sync, save_findings=True)
+            ProjectPersistence.save_and_sync(project, save_findings=True)
 
             severity_counts = {}
             for f in ai_findings:
@@ -132,7 +132,7 @@ def register_ai_tools(mcp):
         success = run_ai_enhancement_phase(project, config)
 
         if success:
-            ProjectPersistence.save_and_sync(project, nctx.aws_sync, save_findings=True)
+            ProjectPersistence.save_and_sync(project, save_findings=True)
 
             severity_counts = {}
             for f in project.findings:

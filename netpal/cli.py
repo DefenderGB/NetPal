@@ -9,11 +9,8 @@ import sys
 import signal
 import argparse
 from colorama import init, Fore, Style
-from .utils.aws.aws_utils import setup_aws_sync
 from .utils.config_loader import ConfigLoader, handle_config_update
-from .utils.persistence.project_persistence import (
-    save_project_to_file, sync_to_s3_if_enabled
-)
+from .utils.persistence.project_persistence import save_project_to_file
 from .utils.scanning.scan_helpers import run_discovery_phase
 from .utils.display.display_utils import print_banner
 from .utils.persistence.project_utils import load_or_create_project
@@ -92,7 +89,7 @@ PROJECT_EDIT_EXAMPLES = """\
 Examples:
   netpal project-edit
 
-Interactively edit the active project's name, external ID, and cloud sync setting.
+Interactively edit the active project's name and external ID.
 """
 
 RECON_TOOLS_EXAMPLES = """\
@@ -140,7 +137,6 @@ class NetPal:
         self.project = None
         self.scanner = None
         self.running = True
-        self.aws_sync = None
         
         # Setup signal handler for graceful shutdown
         signal.signal(signal.SIGINT, self.signal_handler)
@@ -158,11 +154,6 @@ class NetPal:
         self.running = False
         sys.exit(0)
     
-    def setup_aws_sync(self, auto_sync=None):
-        """Setup AWS S3 sync if needed."""
-        self.aws_sync = setup_aws_sync(self.config, auto_sync)
-        return self.aws_sync is not None
-    
     def run_discovery(self, asset, speed=None, verbose=False):
         """Run discovery phase (ping scan)."""
         # Execute discovery scan
@@ -177,10 +168,7 @@ class NetPal:
                 self.project.add_host(host, asset.asset_id)
             
             # Save project
-            save_project_to_file(self.project, self.aws_sync)
-            
-            # Sync to S3 after discovery
-            sync_to_s3_if_enabled(self.aws_sync, self.project)
+            save_project_to_file(self.project)
         
         return hosts
 
@@ -196,8 +184,6 @@ def create_argument_parser():
     )
 
     # Global flags (apply to all subcommands)
-    parser.add_argument('-s','--sync', action='store_true', help='Enable AWS S3 sync')
-    parser.add_argument('-ns','--no-sync', action='store_true', help='Disable AWS S3 sync')
     parser.add_argument('-p','--project', help='Override active project name')
     parser.add_argument('-v','--verbose', action='store_true', help='Enable verbose output')
     parser.add_argument('-c','--config', help='Update config.json with JSON string')
@@ -227,7 +213,7 @@ def create_argument_parser():
     subparsers.add_parser(
         'list',
         parents=[_verbose_parent],
-        help='List all projects (local and S3)',
+        help='List all local projects',
         description='Display all registered projects with their status.',
     )
 
@@ -247,7 +233,7 @@ def create_argument_parser():
         'project-edit',
         parents=[_verbose_parent],
         help='Interactively edit the active project',
-        description='Edit the active project name, external ID, and cloud sync setting.',
+        description='Edit the active project name and external ID.',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=PROJECT_EDIT_EXAMPLES,
     )
@@ -371,7 +357,7 @@ def create_argument_parser():
         'setup',
         parents=[_verbose_parent],
         help='Interactive configuration wizard',
-        description='Configure network interface, AWS sync, AI provider, and notifications.',
+        description='Configure network interface, AI provider, and notifications.',
     )
 
     # ── findings ───────────────────────────────────────────────────────
@@ -396,24 +382,6 @@ def create_argument_parser():
         description='Display all hosts in the active project with open ports and evidence file paths.',
     )
     hosts_parser.add_argument('-H','--host', help='Filter by host IP')
-    # ── pull ───────────────────────────────────────────────────────────
-    pull_parser = subparsers.add_parser(
-        'pull',
-        parents=[_verbose_parent],
-        help='Pull projects from AWS S3',
-        description='Download projects from S3 cloud storage.',
-    )
-    pull_parser.add_argument('-id','--id', help='Specific project ID to pull')
-    pull_parser.add_argument('-a','--all', action='store_true', help='Pull all projects')
-
-    # ── push ───────────────────────────────────────────────────────────
-    subparsers.add_parser(
-        'push',
-        parents=[_verbose_parent],
-        help='Push active project to AWS S3',
-        description='Upload the active cloud-sync-enabled project to S3.',
-    )
-
     # ── export ────────────────────────────────────────────────────────
     export_parser = subparsers.add_parser(
         'export',
@@ -497,7 +465,7 @@ findings JSON, and all evidence files from scan_results/.
 # ── Bootstrap Helper ───────────────────────────────────────────────────────
 
 def _bootstrap_project(args):
-    """Load config, AWS sync, and active project.
+    """Load config and the active project.
     
     Returns:
         Tuple of (NetPal instance, exit_code_or_None).
@@ -516,22 +484,8 @@ def _bootstrap_project(args):
         config['project_name'] = args.project
     
     cli.config = config
-    
-    # Setup AWS sync
-    sync_flag = None
-    if hasattr(args, 'sync') and args.sync:
-        sync_flag = '--sync'
-    elif hasattr(args, 'no_sync') and args.no_sync:
-        sync_flag = '--no-sync'
-    
-    aws_profile = config.get('aws_sync_profile', '').strip()
-    aws_account = config.get('aws_sync_account', '').strip()
-    
-    if sync_flag != '--no-sync' and aws_profile and aws_account:
-        cli.setup_aws_sync(auto_sync=True)
-    
-    # Load or create project
-    cli.project = load_or_create_project(config, Project, cli.aws_sync)
+
+    cli.project = load_or_create_project(config, Project)
     
     return cli, None
 
@@ -539,28 +493,18 @@ def _bootstrap_project(args):
 def _bootstrap_lightweight(args):
     """Lightweight bootstrap for commands that don't need a loaded project.
 
-    Returns a NetPal instance with config and optional aws_sync, but no
-    project loaded.
+    Returns a NetPal instance with config, but no project loaded.
     """
     cli = NetPal()
     config = ConfigLoader.load_config_json() or {}
     cli.config = config
-
-    # Setup AWS sync (best-effort, non-fatal)
-    aws_profile = config.get('aws_sync_profile', '').strip()
-    aws_account = config.get('aws_sync_account', '').strip()
-    if aws_profile and aws_account:
-        try:
-            cli.setup_aws_sync(auto_sync=False)
-        except Exception:
-            pass
 
     return cli
 
 
 # ── Dashboard ──────────────────────────────────────────────────────────────
 
-def display_dashboard(config, project, aws_sync):
+def display_dashboard(config, project):
     """Display project dashboard when netpal is run with no arguments."""
     print_banner()
     
@@ -585,16 +529,6 @@ def display_dashboard(config, project, aws_sync):
         services_count = sum(len(h.services) for h in project.hosts)
         print(f"  Services       : {services_count}")
         print(f"  Findings       : {len(project.findings)}")
-        
-        # Cloud sync status
-        if project.cloud_sync:
-            sync_status = "Synced" if aws_sync and aws_sync.is_enabled() else "Enabled (not connected)"
-        else:
-            if config.get('aws_sync_profile'):
-                sync_status = "Disabled (AWS configured)"
-            else:
-                sync_status = "Disabled"
-        print(f"  Cloud Sync     : {sync_status}")
     else:
         print(f"  Status         : Not yet created")
     
@@ -611,8 +545,6 @@ def display_dashboard(config, project, aws_sync):
     print(f"    netpal ai-report-enhance AI enhancement of findings")
     print(f"    netpal findings          View security findings")
     print(f"    netpal setup             Configuration wizard")
-    print(f"    netpal pull              Pull projects from S3")
-    print(f"    netpal push              Push active project to S3")
     print(f"    netpal auto              Fully automated scan pipeline")
     print(f"    netpal recon-tools       List targets or run exploit tools")
     print(f"    netpal export            Export project scan results as zip")
@@ -628,7 +560,6 @@ def _run_dashboard(args):
     config = ConfigLoader.load_config_json()
     
     project = None
-    aws_sync = None
     
     if config and config.get('project_name'):
         # Override project name if --project flag used
@@ -644,20 +575,8 @@ def _run_dashboard(args):
             findings_path = get_findings_path(project.project_id)
             findings_data = load_json(findings_path, default=[])
             project.findings = [Finding.from_dict(f) for f in findings_data]
-        
-        # Setup AWS sync for status display
-        aws_profile = config.get('aws_sync_profile', '').strip()
-        aws_account = config.get('aws_sync_account', '').strip()
-        if aws_profile and aws_account:
-            try:
-                cli_temp = NetPal()
-                cli_temp.config = config
-                cli_temp.setup_aws_sync(auto_sync=False)
-                aws_sync = cli_temp.aws_sync
-            except Exception:
-                pass
-    
-    return display_dashboard(config, project, aws_sync)
+
+    return display_dashboard(config, project)
 
 
 # ── Main Entry Point ──────────────────────────────────────────────────────
@@ -740,7 +659,7 @@ def main():
         return SetupHandler(cli).execute()
     
     # ── Lightweight commands (no active project required) ──────────────
-    if args.command in ('init', 'list', 'set', 'project-edit', 'delete', 'pull', 'push', 'auto', 'export'):
+    if args.command in ('init', 'list', 'set', 'project-edit', 'delete', 'auto', 'export'):
         cli = _bootstrap_lightweight(args)
 
         from .modes.init_handler import InitHandler
@@ -748,8 +667,6 @@ def main():
         from .modes.set_handler import SetHandler
         from .modes.project_edit_handler import ProjectEditHandler
         from .modes.delete_handler import DeleteHandler
-        from .modes.pull_handler import PullHandler
-        from .modes.push_handler import PushHandler
         from .modes.auto_handler import AutoHandler
         from .modes.export_handler import ExportHandler
 
@@ -759,8 +676,6 @@ def main():
             'set':    lambda: SetHandler(cli, args),
             'project-edit': lambda: ProjectEditHandler(cli, args),
             'delete': lambda: DeleteHandler(cli, args),
-            'pull':   lambda: PullHandler(cli, args),
-            'push':   lambda: PushHandler(cli, args),
             'auto':   lambda: AutoHandler(cli, args),
             'export': lambda: ExportHandler(cli, args),
         }

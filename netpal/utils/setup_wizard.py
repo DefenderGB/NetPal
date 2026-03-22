@@ -75,11 +75,6 @@ def run_interactive_setup(config_path=None):
     if response:
         config['user-agent'] = response
     
-    # AWS Sync Configuration
-    response = input(f"\n{Fore.CYAN}Configure AWS S3 sync (for cloud project storage)? (Y/N) [N]: {Style.RESET_ALL}").strip().upper()
-    if response == 'Y':
-        config = _setup_aws_sync(config)
-    
     # AI Reporting
     response = input(f"\n{Fore.CYAN}Setup AI Reporting? (Y/N) [N]: {Style.RESET_ALL}").strip().upper()
     if response == 'Y':
@@ -98,54 +93,11 @@ def run_interactive_setup(config_path=None):
             json.dump(config, f, indent=2)
         
         print(f"\n{Fore.GREEN}[SUCCESS] Configuration saved to {config_path}{Style.RESET_ALL}")
-        print(f"{Fore.GREEN}Run 'netpal init \"MyProject\"' to create a project{Style.RESET_ALL}\n")
+        print(f"{Fore.GREEN}Run 'netpal init \"MyProject\"' to create a local project{Style.RESET_ALL}\n")
         return 0
     except Exception as e:
         print(f"\n{Fore.RED}[ERROR] Failed to save configuration: {e}{Style.RESET_ALL}")
         return 1
-
-
-def _setup_aws_sync(config):
-    """Setup AWS S3 sync configuration."""
-    current = config.get('aws_sync_account', '')
-    response = input(f"{Fore.CYAN}AWS account ID [{current}]: {Style.RESET_ALL}").strip()
-    if response:
-        config['aws_sync_account'] = response
-    
-    current = config.get('aws_sync_profile', '')
-    response = input(f"{Fore.CYAN}AWS profile name [{current}]: {Style.RESET_ALL}").strip()
-    if response:
-        config['aws_sync_profile'] = response
-    
-    # Suggest bucket name based on account
-    account_id = config.get('aws_sync_account', '')
-    default_bucket = f'netpal-{account_id}' if account_id else ''
-    current = config.get('aws_sync_bucket', default_bucket)
-    response = input(f"{Fore.CYAN}S3 bucket name [{current}]: {Style.RESET_ALL}").strip()
-    if response:
-        config['aws_sync_bucket'] = response
-    elif not config.get('aws_sync_bucket') and default_bucket:
-        # Set default if not already set
-        config['aws_sync_bucket'] = default_bucket
-    
-    # Ask about default cloud sync for new projects
-    print(f"\n{Fore.YELLOW}[INFO] Cloud sync is controlled per-project{Style.RESET_ALL}")
-    current_default = config.get('cloud_sync_default', False)
-    current_str = "Y" if current_default else "N"
-    response = input(f"{Fore.CYAN}Enable cloud sync by default for NEW projects? (Y/N) [{current_str}]: {Style.RESET_ALL}").strip().upper()
-    if response:
-        config['cloud_sync_default'] = (response == 'Y')
-    elif 'cloud_sync_default' not in config:
-        config['cloud_sync_default'] = False
-    
-    if config.get('cloud_sync_default'):
-        print(f"{Fore.GREEN}  ✓ New projects will sync to S3 by default{Style.RESET_ALL}")
-        print(f"{Fore.YELLOW}  (Can be overridden with --no-sync flag){Style.RESET_ALL}")
-    else:
-        print(f"{Fore.YELLOW}  ○ New projects will NOT sync by default{Style.RESET_ALL}")
-        print(f"{Fore.GREEN}  (Can be enabled with --sync flag){Style.RESET_ALL}")
-    
-    return config
 
 
 def _setup_ai_provider(config):

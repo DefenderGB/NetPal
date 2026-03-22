@@ -251,7 +251,7 @@ class AssetFactory:
             raise ValueError(f"Unknown asset type: {args.type}")
 
 
-def create_asset_headless(project, asset_type, name, target_data, aws_sync=None):
+def create_asset_headless(project, asset_type, name, target_data):
     """Create an asset, add it to the project, and save.
 
     This is the shared, UI-agnostic asset creation logic used by both
@@ -263,8 +263,6 @@ def create_asset_headless(project, asset_type, name, target_data, aws_sync=None)
         name: Human-readable asset name.
         target_data: Type-specific target data (CIDR string, comma-list
             string, single IP string, or ``{'file': path}`` dict for list type).
-        aws_sync: Optional ``AwsSyncService`` instance for S3 sync.
-
     Returns:
         The created ``Asset`` instance.
 
@@ -279,11 +277,11 @@ def create_asset_headless(project, asset_type, name, target_data, aws_sync=None)
         project_id=project.project_id,
     )
     project.add_asset(asset)
-    save_project_to_file(project, aws_sync)
+    save_project_to_file(project)
     return asset
 
 
-def delete_asset_headless(project, asset_name, aws_sync=None):
+def delete_asset_headless(project, asset_name):
     """Find an asset by name, remove it from the project, and save.
 
     This is the shared, UI-agnostic asset deletion logic used by both
@@ -292,8 +290,6 @@ def delete_asset_headless(project, asset_name, aws_sync=None):
     Args:
         project: Project instance containing the asset.
         asset_name: Name of the asset to delete.
-        aws_sync: Optional ``AwsSyncService`` instance for S3 sync.
-
     Returns:
         True on success.
 
@@ -311,5 +307,5 @@ def delete_asset_headless(project, asset_name, aws_sync=None):
         raise ValueError(f"Asset '{asset_name}' not found")
 
     project.remove_asset(asset)
-    save_project_to_file(project, aws_sync)
+    save_project_to_file(project)
     return True

@@ -9,8 +9,7 @@ def register_project_resources(mcp):
     def dashboard(ctx: Context) -> dict:
         """Project dashboard summary for the active project.
 
-        Returns project name, ID, asset/host/service/finding counts,
-        and cloud sync status.
+        Returns project name, ID, and asset/host/service/finding counts.
         """
         from ..mcp_server import get_netpal_ctx
         from ..utils.config_loader import ConfigLoader
@@ -34,9 +33,6 @@ def register_project_resources(mcp):
             }
 
         services_count = sum(len(h.services) for h in project.hosts)
-        cloud_status = "disabled"
-        if project.cloud_sync:
-            cloud_status = "enabled" if nctx.aws_sync else "enabled_not_connected"
 
         return {
             "active_project": project_name,
@@ -45,7 +41,6 @@ def register_project_resources(mcp):
             "hosts": len(project.hosts),
             "services": services_count,
             "findings": len(project.findings),
-            "cloud_sync": cloud_status,
         }
 
     @mcp.resource("netpal://projects")
@@ -53,7 +48,7 @@ def register_project_resources(mcp):
         """List all registered projects with stats.
 
         Returns an array of project dicts with name, ID, external ID,
-        cloud sync status, and resource counts.
+        and resource counts.
         """
         from ..mcp_server import get_netpal_ctx
         from ..utils.persistence.file_utils import (
@@ -73,7 +68,6 @@ def register_project_resources(mcp):
                 "name": proj.get("name", "Unknown"),
                 "id": pid,
                 "external_id": proj.get("external_id", ""),
-                "cloud_sync": proj.get("cloud_sync", False),
                 "is_active": proj.get("name", "") == active_name,
             }
 
@@ -96,26 +90,6 @@ def register_project_resources(mcp):
                 entry.update({"assets": 0, "hosts": 0, "services": 0, "findings": 0})
 
             result.append(entry)
-
-        # Also include S3-only projects if AWS sync is available
-        if nctx.aws_sync:
-            try:
-                local_ids = {p.get("id") for p in local_projects}
-                s3_registry, err = nctx.aws_sync._download_s3_registry()
-                if s3_registry and "projects" in s3_registry:
-                    for sp in s3_registry["projects"]:
-                        if sp.get("id") not in local_ids and not sp.get("deleted"):
-                            result.append({
-                                "name": sp.get("name", "Unknown"),
-                                "id": sp.get("id", ""),
-                                "external_id": sp.get("external_id", ""),
-                                "cloud_sync": True,
-                                "is_active": False,
-                                "location": "s3_only",
-                                "assets": 0, "hosts": 0, "services": 0, "findings": 0,
-                            })
-            except Exception:
-                pass
 
         return result
 

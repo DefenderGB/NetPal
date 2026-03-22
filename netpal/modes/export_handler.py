@@ -23,7 +23,6 @@ class ExportHandler(ModeHandler):
         self.config = netpal_instance.config
         self.project = None
         self.scanner = None
-        self.aws_sync = netpal_instance.aws_sync
         self.args = args
 
     # ── Template-method steps ──────────────────────────────────────────

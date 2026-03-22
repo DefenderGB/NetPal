@@ -107,7 +107,7 @@ class AssetCreateHandler(ModeHandler):
 
             asset = create_asset_headless(
                 self.project, args.type, args.name,
-                target_data, aws_sync=self.aws_sync,
+                target_data,
             )
 
             print(f"{Fore.GREEN}[SUCCESS] Created asset: {asset.name} ({asset.type}){Style.RESET_ALL}")
@@ -162,7 +162,7 @@ class AssetCreateHandler(ModeHandler):
         from ..utils.asset_factory import delete_asset_headless
 
         try:
-            delete_asset_headless(self.project, name, aws_sync=self.aws_sync)
+            delete_asset_headless(self.project, name)
             print(f"{Fore.GREEN}[SUCCESS] Deleted asset: {name}{Style.RESET_ALL}")
             return True
         except ValueError as e:
@@ -195,7 +195,7 @@ class AssetCreateHandler(ModeHandler):
         if orphan_finding_ids:
             self.project.findings = [f for f in self.project.findings if f.finding_id not in orphan_finding_ids]
 
-        save_project_to_file(self.project, self.aws_sync)
+        save_project_to_file(self.project)
         print(f"\n{Fore.GREEN}[SUCCESS] Removed {len(orphans)} orphan host(s) and {len(orphan_finding_ids)} associated finding(s).{Style.RESET_ALL}")
         return True
 

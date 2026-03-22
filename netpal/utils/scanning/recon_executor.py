@@ -12,7 +12,7 @@ from .scan_helpers import (
     send_scan_notification,
 )
 from ..persistence.file_utils import fix_scan_results_permissions
-from ..persistence.project_persistence import save_project_to_file, save_findings_to_file, sync_to_s3_if_enabled
+from ..persistence.project_persistence import save_project_to_file, save_findings_to_file
 from ...services.notification_service import NotificationService
 from ...services.tools.tool_orchestrator import ToolOrchestrator
 
@@ -67,7 +67,7 @@ def execute_recon_with_tools(netpal_instance, asset, target, interface, scan_typ
     # Convenience closures that match the callback signatures expected by
     # run_exploit_tools_on_hosts (zero-arg callables).
     def _save_project():
-        save_project_to_file(netpal_instance.project, netpal_instance.aws_sync)
+        save_project_to_file(netpal_instance.project)
 
     def _save_findings():
         save_findings_to_file(netpal_instance.project)
@@ -155,9 +155,6 @@ def execute_recon_with_tools(netpal_instance, asset, target, interface, scan_typ
         new_host_count, new_service_count, tools_executed,
         duration_str, None,
     )
-
-    # Sync to S3 after recon
-    sync_to_s3_if_enabled(netpal_instance.aws_sync, netpal_instance.project)
 
     # Fix permissions so normal user can access files
     fix_scan_results_permissions()

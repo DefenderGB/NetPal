@@ -10,7 +10,7 @@ This guide covers the project structure and how to extend NetPal.
 
 ### Quick Start (recommended)
 
-The [`install.sh`](install.sh) script handles everything — installs **uv**, external tools (nmap, nuclei, AWS CLI), creates a Python 3.12 virtual environment, syncs dependencies (including Playwright), installs NetPal in editable mode, and downloads the Chromium browser for Playwright:
+The [`install.sh`](install.sh) script handles everything — installs **uv**, external tools (nmap and optionally nuclei), creates a Python 3.12 virtual environment, syncs dependencies (including Playwright), installs NetPal in editable mode, and downloads the Chromium browser for Playwright:
 
 ```bash
 git clone https://github.com/DefenderGB/NetPal.git
@@ -53,7 +53,6 @@ netpal setup
 | playwright | Yes | Python dependency; `install.sh` runs `playwright install chromium` automatically |
 | Go | Optional | Required to install nuclei |
 | nuclei | Yes | Vulnerability scanning with templates |
-| AWS CLI | Yes | Only needed for S3 sync |
 
 ### Updating an Existing Install
 
@@ -93,20 +92,24 @@ netpal/
 ├── modes/                         # Subcommand handlers (Template Method)
 │   ├── __init__.py                # Exports all handlers
 │   ├── base_handler.py            # Abstract ModeHandler base class
-│   ├── asset_create_handler.py    # netpal asset-create
+│   ├── asset_create_handler.py    # netpal assets
 │   ├── auto_handler.py            # netpal auto (fully automated pipeline)
 │   ├── recon_cli_handler.py       # netpal recon
+│   ├── recon_tools_handler.py     # netpal recon-tools
 │   ├── ai_review_handler.py       # netpal ai-review
 │   ├── ai_enhance_handler.py      # netpal ai-report-enhance
 │   ├── findings_cli_handler.py    # netpal findings
-│   ├── pull_handler.py            # netpal pull
+│   ├── hosts_handler.py           # netpal hosts
+│   ├── list_handler.py            # netpal list
+│   ├── project_edit_handler.py    # netpal project-edit
+│   ├── export_handler.py          # netpal export
+│   ├── delete_handler.py          # netpal delete
 │   └── setup_handler.py           # netpal setup
 ├── services/                      # Core services
 │   ├── nmap_scanner.py            # Multi-threaded nmap (deprecated facade)
 │   ├── tool_runner.py             # Tool automation (deprecated facade)
 │   ├── xml_parser.py              # Nmap XML parsing
 │   ├── ai_analyzer.py             # AI analysis (deprecated facade)
-│   ├── aws_sync.py                # S3 synchronization
 │   ├── notification_service.py    # Webhook notifications
 │   ├── ai/                        # AI provider system
 │   │   ├── analyzer.py            # Main AI analyzer
@@ -133,24 +136,16 @@ netpal/
 │       └── tool_orchestrator.py   # Coordinates tool execution
 └── utils/                         # Shared utilities
     ├── ai_helpers.py              # AI workflow helpers
-    ├── ai_validation.py           # AI config validation (deprecated — use ProviderFactory.validate())
     ├── asset_factory.py           # Asset creation factory
-    ├── aws_utils.py               # AWS session/sync setup helpers
+    ├── aws/aws_utils.py           # Safe boto3 session helpers for Bedrock
     ├── config_loader.py           # JSON configuration management
-    ├── display_utils.py           # Banner, next-command box, formatting
-    ├── file_utils.py              # File I/O operations
-    ├── finding_viewer.py          # Finding summary display
+    ├── display/                   # Banner, next-command box, formatting
     ├── image_loader.py            # Screenshot loading for AI
     ├── logger.py                  # Centralized logging (get_logger / setup_logging)
     ├── naming_utils.py            # Name sanitization
     ├── network_utils.py           # CIDR validation, subnet splitting
-    ├── next_command.py            # Next-command suggestion engine
-    ├── project_paths.py           # Project path resolution
-    ├── project_persistence.py     # Save/sync project data (ProjectPersistence.save_and_sync)
-    ├── project_utils.py           # Project load/create helpers
-    ├── pull_utils.py              # S3 pull operations
-    ├── recon_executor.py          # Recon scan execution
-    ├── scan_helpers.py            # Scan phase helpers
+    ├── persistence/               # Local project/registry persistence helpers
+    ├── scanning/                  # Recon execution helpers
     ├── setup_wizard.py            # Setup wizard logic
     ├── tool_paths.py              # External tool detection
     └── validation.py              # Input validation
@@ -164,18 +159,21 @@ The `main()` function in `cli.py` is the single entry point. It uses `argparse` 
 
 ```
 netpal                          → display_dashboard()
-netpal asset-create …           → AssetCreateHandler
+netpal assets …                 → AssetCreateHandler
 netpal recon …                  → ReconCLIHandler
+netpal recon-tools …            → ReconToolsHandler
 netpal auto …                   → AutoHandler
 netpal ai-review …              → AIReviewHandler
 netpal ai-report-enhance …     → AIEnhanceHandler
 netpal findings …               → FindingsCLIHandler
+netpal hosts …                  → HostsHandler
+netpal project-edit …           → ProjectEditHandler
+netpal export …                 → ExportHandler
 netpal setup                    → SetupHandler
-netpal pull …                   → PullHandler
 netpal interactive              → tui.run_interactive()
 ```
 
-The `_bootstrap_project(args)` helper loads config, sets up AWS sync, and loads the active project. All subcommand routes (except `setup` and dashboard) call it first.
+The `_bootstrap_project(args)` helper loads config and the active local project. All subcommand routes (except `setup`, `list`, and the dashboard) call it first.
 
 ### Mode Handlers (`modes/`)
 
@@ -193,7 +191,6 @@ class ModeHandler(ABC):
         result = self.execute_workflow(context)
         if result:
             self.save_results(result)
-            self.sync_if_enabled()
             self.display_completion(result)
             self.suggest_next_command(result)  # ← next-step hint
         return 0 if result else 1
@@ -313,7 +310,7 @@ To add a new TUI view:
 ## Testing
 
 Before submitting changes:
-- Verify `python3 -m py_compile` passes on all modified files
+- Verify `python -m compileall netpal netpalui` passes on modified areas
 - Test affected subcommands end-to-end
 - Verify `--help` output is correct
 - Check next-command suggestions print for relevant transitions

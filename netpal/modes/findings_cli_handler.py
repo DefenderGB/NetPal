@@ -56,7 +56,7 @@ class FindingsCLIHandler(ModeHandler):
         
         if len(self.project.findings) < original_count:
             save_findings_to_file(self.project)
-            save_project_to_file(self.project, self.aws_sync)
+            save_project_to_file(self.project)
             print(f"{Fore.GREEN}[SUCCESS] Deleted finding {finding_id}{Style.RESET_ALL}")
             return True
         else:

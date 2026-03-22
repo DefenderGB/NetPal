@@ -89,9 +89,6 @@ def register_config_tools(mcp):
         ai_azure_token: str = "",
         ai_azure_endpoint: str = "",
         ai_azure_model: str = "",
-        aws_sync_profile: str = "",
-        aws_sync_account: str = "",
-        aws_sync_bucket: str = "",
         notification_enabled: bool = None,
         notification_type: str = "",
         notification_webhook_url: str = "",
@@ -103,7 +100,7 @@ def register_config_tools(mcp):
 
         Args:
             network_interface: Default network interface (e.g. 'eth0').
-            ai_type: AI provider — 'bedrock', 'anthropic', 'openai', 'gemini', 'ollama', 'azure'.
+            ai_type: AI provider — 'aws', 'anthropic', 'openai', 'gemini', 'ollama', 'azure'.
             ai_aws_profile: AWS profile for Bedrock.
             ai_aws_region: AWS region for Bedrock.
             ai_aws_model: Bedrock model ID.
@@ -118,9 +115,6 @@ def register_config_tools(mcp):
             ai_azure_token: Azure OpenAI API token.
             ai_azure_endpoint: Azure OpenAI endpoint.
             ai_azure_model: Azure model deployment name.
-            aws_sync_profile: AWS profile for S3 sync.
-            aws_sync_account: AWS account ID for S3 sync.
-            aws_sync_bucket: S3 bucket name for sync.
             notification_enabled: Enable webhook notifications.
             notification_type: Notification type ('slack' or 'discord').
             notification_webhook_url: Webhook URL.
@@ -153,9 +147,6 @@ def register_config_tools(mcp):
             "ai_azure_token": ai_azure_token,
             "ai_azure_endpoint": ai_azure_endpoint,
             "ai_azure_model": ai_azure_model,
-            "aws_sync_profile": aws_sync_profile,
-            "aws_sync_account": aws_sync_account,
-            "aws_sync_bucket": aws_sync_bucket,
             "notification_type": notification_type,
             "notification_webhook_url": notification_webhook_url,
         }
@@ -208,7 +199,6 @@ def register_config_tools(mcp):
             "nuclei": {"available": False, "detail": ""},
             "playwright": {"available": False, "detail": ""},
             "ai_configured": {"available": False, "detail": ""},
-            "aws_sync": {"available": False, "detail": ""},
         }
 
         # nmap
@@ -269,14 +259,6 @@ def register_config_tools(mcp):
             )
         except Exception as e:
             results["ai_configured"]["detail"] = str(e)
-
-        # AWS sync
-        results["aws_sync"]["available"] = nctx.aws_sync is not None
-        results["aws_sync"]["detail"] = (
-            "AWS S3 sync available"
-            if nctx.aws_sync
-            else "AWS S3 sync not configured"
-        )
 
         all_ok = all(r["available"] for r in results.values())
         return {

@@ -47,18 +47,11 @@ async def lifespan(server: FastMCP):
     except Exception:
         ctx.nmap_available = False
 
-    # Initialise AWS sync (best-effort, non-fatal)
-    aws_profile = config.get("aws_sync_profile", "").strip()
-    aws_account = config.get("aws_sync_account", "").strip()
-    if aws_profile and aws_account:
-        ctx.setup_aws_sync()
-
     logger.info(
-        "NetPal MCP server started — nmap=%s sudo=%s nuclei=%s aws=%s",
+        "NetPal MCP server started — nmap=%s sudo=%s nuclei=%s",
         ctx.nmap_available,
         ctx.sudo_available,
         ctx.nuclei_available,
-        ctx.aws_sync is not None,
     )
 
     yield {"netpal_ctx": ctx}
@@ -100,7 +93,6 @@ from .mcp_tools.asset_tools import register_asset_tools
 from .mcp_tools.scan_tools import register_scan_tools
 from .mcp_tools.ai_tools import register_ai_tools
 from .mcp_tools.finding_tools import register_finding_tools
-from .mcp_tools.cloud_tools import register_cloud_tools
 from .mcp_tools.config_tools import register_config_tools
 
 register_project_tools(mcp)
@@ -108,7 +100,6 @@ register_asset_tools(mcp)
 register_scan_tools(mcp)
 register_ai_tools(mcp)
 register_finding_tools(mcp)
-register_cloud_tools(mcp)
 register_config_tools(mcp)
 
 

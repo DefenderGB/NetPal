@@ -18,10 +18,6 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "user-agent": "",
     "web_ports": [80, 443, 593, 808, 3000, 4443, 5000, 5800, 5801, 6543, 7443, 7627, 8000, 8003, 8008, 8080, 8443, 8501, 8888, 9443],
     "web_services": ["http", "https", "http-alt", "http-proxy", "https-alt"],
-    "aws_sync_account": "",
-    "aws_sync_profile": "",
-    "aws_sync_bucket": "",
-    "cloud_sync_default": False,
     "ai_type": "",
     "ai_aws_profile": "",
     "ai_aws_account": "",
@@ -90,6 +86,9 @@ class ConfigLoader:
                 f"{Fore.YELLOW}       Run 'netpal setup' to configure it.{Style.RESET_ALL}"
             )
 
+        from .persistence.local_cleanup import cleanup_legacy_local_storage
+
+        cleanup_legacy_local_storage(config_path=config_path)
         return config_path
     
     @staticmethod

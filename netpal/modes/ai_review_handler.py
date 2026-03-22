@@ -39,15 +39,13 @@ class AIReviewHandler(ModeHandler):
         from ..utils.ai_helpers import run_ai_reporting_phase
         from ..utils.persistence.project_persistence import ProjectPersistence
         
-        ai_findings = run_ai_reporting_phase(self.project, self.config, self.aws_sync)
+        ai_findings = run_ai_reporting_phase(self.project, self.config)
         
         if ai_findings:
             for finding in ai_findings:
                 self.project.add_finding(finding)
             
-            ProjectPersistence.save_and_sync(
-                self.project, self.aws_sync, save_findings=True
-            )
+            ProjectPersistence.save_and_sync(self.project, save_findings=True)
             
             print(f"\n{Fore.GREEN}[SUCCESS] Generated {len(ai_findings)} finding(s){Style.RESET_ALL}")
             return True

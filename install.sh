@@ -89,7 +89,6 @@ echo "================================================"
 # Track installation status
 NMAP_INSTALLED=false
 PLAYWRIGHT_INSTALLED=false
-AWS_INSTALLED=false
 NUCLEI_INSTALLED=false
 GO_INSTALLED=false
 
@@ -187,38 +186,6 @@ fi
 # The browser binaries are installed after the venv is set up (see below).
 
 PLAYWRIGHT_INSTALLED=true
-
-# ── AWS CLI (optional) ────────────────────────────────────────────────────
-
-echo ""
-echo "[INFO] Checking for AWS CLI (optional for S3 sync)..."
-if command -v aws &> /dev/null; then
-    echo "✓ AWS CLI is installed: $(aws --version)"
-    AWS_INSTALLED=true
-else
-    echo "○ AWS CLI is not installed (optional for S3 sync)"
-    read -p "Install AWS CLI? (Y/N): " -n 1 -r
-    echo
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
-        if [[ "$OS" == "linux" ]]; then
-            if command -v apt-get &> /dev/null; then
-                sudo apt-get update && sudo apt-get install -y awscli
-            elif command -v yum &> /dev/null; then
-                sudo yum install -y awscli
-            elif command -v dnf &> /dev/null; then
-                sudo dnf install -y awscli
-            fi
-        elif [[ "$OS" == "macos" ]]; then
-            if command -v brew &> /dev/null; then
-                brew install awscli
-            fi
-        fi
-        if command -v aws &> /dev/null; then
-            echo "✓ AWS CLI installed: $(aws --version)"
-            AWS_INSTALLED=true
-        fi
-    fi
-fi
 
 # ── nuclei (optional) ─────────────────────────────────────────────────────
 
@@ -373,11 +340,6 @@ if [ "$NMAP_INSTALLED" = true ]; then
     echo "  ✓ playwright installed (Chromium browser)"
     echo ""
     echo "Optional tools:"
-    if [ "$AWS_INSTALLED" = true ]; then
-        echo "  ✓ AWS CLI installed (configure for S3 sync)"
-    else
-        echo "  ○ AWS CLI not installed (optional for S3 sync)"
-    fi
     if [ "$NUCLEI_INSTALLED" = true ]; then
         echo "  ✓ nuclei installed"
     else
@@ -390,11 +352,6 @@ if [ "$NMAP_INSTALLED" = true ]; then
     echo "If not setup, then run and then scan:"
     echo "  1. netpal setup"
     echo "  2. netpal auto --project 'My Network' --range '10.0.0.0/24' --interface en0"
-    echo ""
-    echo "If AWS S3 is not setup, configure AWS profile for S3 sync:"
-    echo "  aws configure set aws_access_key_id \"YOUR_KEY\" --profile netpal-user"
-    echo "  aws configure set aws_secret_access_key \"YOUR_SECRET\" --profile netpal-user"
-    echo "  aws configure set region us-west-2 --profile netpal-user"
     echo ""
     echo "For detailed instructions, see README.md"
     echo ""
@@ -409,11 +366,6 @@ else
     fi
     echo ""
     echo "Optional tools status:"
-    if [ "$AWS_INSTALLED" = true ]; then
-        echo "  ✓ AWS CLI installed"
-    else
-        echo "  ○ AWS CLI not installed (optional)"
-    fi
     if [ "$NUCLEI_INSTALLED" = true ]; then
         echo "  ✓ nuclei installed"
     else

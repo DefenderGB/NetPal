@@ -55,7 +55,6 @@ packages = [
     "netpal.services",
     "netpal.services.ai",
     "netpal.services.ai.providers",
-    "netpal.services.aws",
     "netpal.services.nmap",
     "netpal.services.tools",
     "netpal.utils",

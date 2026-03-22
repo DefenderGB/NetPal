@@ -11,7 +11,6 @@ Subcommand handlers:
   - AIEnhanceHandler     → netpal ai-report-enhance
   - FindingsCLIHandler   → netpal findings
   - HostsHandler         → netpal hosts
-  - PullHandler          → netpal pull
   - InitHandler          → netpal init
   - ListHandler          → netpal list
   - SetHandler           → netpal set
@@ -27,7 +26,6 @@ from .recon_tools_handler import ReconToolsHandler
 from .ai_review_handler import AIReviewHandler
 from .ai_enhance_handler import AIEnhanceHandler
 from .findings_cli_handler import FindingsCLIHandler
-from .pull_handler import PullHandler
 from .hosts_handler import HostsHandler
 from .init_handler import InitHandler
 from .list_handler import ListHandler
@@ -46,7 +44,6 @@ __all__ = [
     'AIEnhanceHandler',
     'FindingsCLIHandler',
     'HostsHandler',
-    'PullHandler',
     'InitHandler',
     'ListHandler',
     'SetHandler',

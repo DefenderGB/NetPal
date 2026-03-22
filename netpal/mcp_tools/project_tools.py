@@ -11,7 +11,6 @@ def register_project_tools(mcp):
         name: str,
         description: str = "",
         external_id: str = "",
-        cloud_sync: bool = False,
     ) -> dict:
         """Create a new penetration testing project and set it as active.
 
@@ -19,16 +18,13 @@ def register_project_tools(mcp):
             name: Project name (required).
             description: Optional project description.
             external_id: Optional external tracking ID (e.g. JIRA-123).
-            cloud_sync: Enable AWS S3 cloud sync for this project.
 
         Returns:
-            Dict with project_id, name, external_id, cloud_sync, and message.
+            Dict with project_id, name, external_id, and message.
         """
         from ..mcp_server import get_netpal_ctx
         from ..models.project import Project
-        from ..utils.persistence.file_utils import (
-            register_project, list_registered_projects,
-        )
+        from ..utils.persistence.file_utils import list_registered_projects
         from ..utils.persistence.project_persistence import save_project_to_file
         from ..utils.config_loader import ConfigLoader
 
@@ -51,20 +47,11 @@ def register_project_tools(mcp):
                 }
 
         # Create project
-        project = Project(name=name, cloud_sync=cloud_sync)
+        project = Project(name=name)
         if external_id:
             project.external_id = external_id.strip()
 
-        # Persist
-        save_project_to_file(project, nctx.aws_sync)
-        register_project(
-            project_id=project.project_id,
-            project_name=project.name,
-            updated_utc_ts=project.modified_utc_ts,
-            external_id=project.external_id,
-            cloud_sync=project.cloud_sync,
-            aws_sync=nctx.aws_sync,
-        )
+        save_project_to_file(project)
         ConfigLoader.update_config_project_name(name)
         nctx.config["project_name"] = name
 
@@ -72,7 +59,6 @@ def register_project_tools(mcp):
             "project_id": project.project_id,
             "name": project.name,
             "external_id": project.external_id,
-            "cloud_sync": project.cloud_sync,
             "message": f"Project '{name}' created and set as active.",
         }
 
@@ -119,9 +105,8 @@ def register_project_tools(mcp):
         ctx: Context,
         name: str = "",
         external_id: str = "",
-        cloud_sync: bool = None,
     ) -> dict:
-        """Edit the active project's metadata (name, external ID, cloud sync).
+        """Edit the active project's metadata (name and external ID).
 
         Only provided (non-empty) fields are updated. Omit a field to keep
         its current value.
@@ -129,7 +114,6 @@ def register_project_tools(mcp):
         Args:
             name: New project name (empty string = keep current).
             external_id: New external ID (empty string = keep current).
-            cloud_sync: New cloud sync setting (None = keep current).
 
         Returns:
             Dict with the updated project details and what changed.
@@ -158,11 +142,9 @@ def register_project_tools(mcp):
         project_id = match["id"]
         old_name = match.get("name", "")
         old_ext_id = match.get("external_id", "")
-        old_cloud_sync = match.get("cloud_sync", False)
 
         new_name = name.strip() if name else old_name
         new_ext_id = external_id.strip() if external_id else old_ext_id
-        new_cloud_sync = cloud_sync if cloud_sync is not None else old_cloud_sync
 
         changes = {}
         if new_name != old_name:
@@ -175,9 +157,6 @@ def register_project_tools(mcp):
         if new_ext_id != old_ext_id:
             changes["external_id"] = {"old": old_ext_id, "new": new_ext_id}
 
-        if new_cloud_sync != old_cloud_sync:
-            changes["cloud_sync"] = {"old": old_cloud_sync, "new": new_cloud_sync}
-
         if not changes:
             return {"message": "No changes made.", "project_id": project_id, "name": old_name}
 
@@ -187,7 +166,6 @@ def register_project_tools(mcp):
             if entry.get("id") == project_id:
                 entry["name"] = new_name
                 entry["external_id"] = new_ext_id
-                entry["cloud_sync"] = new_cloud_sync
                 entry["updated_utc_ts"] = int(time.time())
                 break
         save_projects_registry(registry)
@@ -198,7 +176,6 @@ def register_project_tools(mcp):
         if project_data:
             project_data["name"] = new_name
             project_data["external_id"] = new_ext_id
-            project_data["cloud_sync"] = new_cloud_sync
             project_data["modified_utc_ts"] = int(time.time())
             save_json(project_path, project_data, compact=False)
 
@@ -211,7 +188,6 @@ def register_project_tools(mcp):
             "project_id": project_id,
             "name": new_name,
             "external_id": new_ext_id,
-            "cloud_sync": new_cloud_sync,
             "changes": changes,
             "message": f"Project updated: {', '.join(changes.keys())} changed.",
         }
@@ -262,28 +238,6 @@ def register_project_tools(mcp):
             )
             return info
 
-        # Delete cloud files if applicable
-        warnings = []
-        loaded = Project.load_from_file(name)
-        if loaded and loaded.cloud_sync:
-            try:
-                from ..utils.aws.aws_utils import is_aws_sync_available, create_safe_boto3_session
-                from ..services.aws.operations import S3Operations
-                from ..services.aws.registry import RegistryManager
-
-                if is_aws_sync_available(nctx.config):
-                    aws_profile = nctx.config.get("aws_sync_profile", "").strip()
-                    aws_account = nctx.config.get("aws_sync_account", "").strip()
-                    bucket = nctx.config.get("aws_sync_bucket", f"netpal-{aws_account}")
-                    session = create_safe_boto3_session(aws_profile)
-                    region = session.region_name or "us-west-2"
-                    s3_ops = S3Operations(aws_profile, region, bucket)
-                    registry = RegistryManager(aws_profile, region, bucket)
-                    s3_ops.delete_s3_prefix(project_id)
-                    registry.mark_project_deleted_in_s3(project_id)
-            except Exception as e:
-                warnings.append(f"Cloud deletion failed: {e}")
-
         # Delete locally
         delete_project_locally(project_id)
 
@@ -299,6 +253,4 @@ def register_project_tools(mcp):
             "deleted": True,
             "message": f"Project '{name}' deleted successfully.",
         }
-        if warnings:
-            result["warnings"] = warnings
         return result

@@ -355,10 +355,6 @@ class CreateProjectScreen(ModalScreen):
     }
     """
 
-    def __init__(self, aws_available: bool = False) -> None:
-        super().__init__()
-        self._aws_available = aws_available
-
     def compose(self) -> ComposeResult:
         with Vertical(classes="modal-dialog compact-form"):
             yield Static("[bold]Create New Project[/]", classes="section-title")
@@ -366,13 +362,6 @@ class CreateProjectScreen(ModalScreen):
                 with Vertical():
                     yield Label("Project Name")
                     yield Input(id="new-proj-name", placeholder="e.g. Q1 External Pentest")
-                with Vertical(id="cloud-sync-group"):
-                    yield Label("Cloud Sync", id="new-proj-cloud-label")
-                    yield Select(
-                        [("Yes", True), ("No", False)],
-                        id="new-proj-cloud-sync",
-                        value=False,
-                    )
             with Horizontal():
                 with Vertical():
                     yield Label("Description (optional)")
@@ -384,12 +373,6 @@ class CreateProjectScreen(ModalScreen):
             with Horizontal(classes="modal-buttons"):
                 yield Button("Create", id="btn-do-create", variant="success")
                 yield Button("Cancel", id="btn-cancel-create", variant="default")
-
-    def on_mount(self) -> None:
-        cloud_group = self.query_one("#cloud-sync-group", Vertical)
-        cloud_group.display = self._aws_available
-        if not self._aws_available:
-            self.query_one("#new-proj-cloud-sync", Select).value = False
 
     @on(Button.Pressed, "#btn-do-create")
     def _handle_create(self, event: Button.Pressed) -> None:
@@ -412,8 +395,6 @@ class CreateProjectScreen(ModalScreen):
             return
 
         config = self.app.config or {}
-        cloud_sync_widget = self.query_one("#new-proj-cloud-sync", Select)
-        cloud_sync = bool(cloud_sync_widget.value) if cloud_sync_widget.value is not Select.BLANK else False
 
         try:
             project = create_project_headless(
@@ -421,8 +402,6 @@ class CreateProjectScreen(ModalScreen):
                 config=config,
                 description=description,
                 external_id=external_id,
-                cloud_sync=cloud_sync,
-                aws_sync=None,
             )
             _set_active_project(name, self.app.config)
             self.dismiss(project)
@@ -682,7 +661,6 @@ class ProjectsView(VerticalScroll):
         with Horizontal(id="proj-action-bar"):
             yield Button("➕ Create Project", id="btn-create-project", variant="success")
             yield Button("🗑  Delete Project", id="btn-delete-project", variant="error")
-            yield Button("☁  Sync to Cloud", id="btn-sync-cloud", variant="primary")
         yield Static("", id="proj-status")
 
     def on_mount(self) -> None:
@@ -700,14 +678,8 @@ class ProjectsView(VerticalScroll):
         delete_btn = self.query_one("#btn-delete-project", Button)
         delete_btn.disabled = project is None
 
-        # Sync button: requires an active project AND AWS configured
-        sync_btn = self.query_one("#btn-sync-cloud", Button)
-        aws_ok = self.app.aws_available
-        sync_btn.disabled = (project is None) or (not aws_ok)
-        sync_btn.display = aws_ok
-
     def _refresh_table(self) -> None:
-        table = _reset_table(self, "proj-table", "  ", "Name", "ID", "External ID", "Cloud Sync")
+        table = _reset_table(self, "proj-table", "  ", "Name", "ID", "External ID")
         projects = _list_projects()
         active = self.app.config.get("project_name", "")
         detail = self.query_one("#proj-detail", Static)
@@ -721,7 +693,6 @@ class ProjectsView(VerticalScroll):
                 p.get("name", ""),
                 p.get("id", ""),
                 p.get("external_id", "") or "—",
-                "Yes" if p.get("cloud_sync") else "No",
                 key=p.get("id", ""),
             )
         # Update detail with active project info after table refresh
@@ -759,8 +730,7 @@ class ProjectsView(VerticalScroll):
 
     @on(Button.Pressed, "#btn-create-project")
     def _handle_create(self, event: Button.Pressed) -> None:
-        aws_ok = self.app.aws_available
-        self.app.push_screen(CreateProjectScreen(aws_available=aws_ok), self._on_create_dismissed)
+        self.app.push_screen(CreateProjectScreen(), self._on_create_dismissed)
 
     def _on_create_dismissed(self, project) -> None:
         """Callback when CreateProjectScreen is dismissed."""
@@ -795,41 +765,6 @@ class ProjectsView(VerticalScroll):
             detail.update("")
         self.refresh_view()
         self.app.refresh()
-
-    @on(Button.Pressed, "#btn-sync-cloud")
-    def _handle_sync(self, event: Button.Pressed) -> None:
-        project = self.app.project
-        if not project:
-            status = self.query_one("#proj-status", Static)
-            status.update("[red]No active project to sync.[/]")
-            return
-        self._run_sync()
-
-    @work(thread=True, exclusive=True, group="cloud_sync")
-    def _run_sync(self) -> None:
-        """Sync the active project to S3 in a background thread."""
-        project = self.app.project
-        status = self.query_one("#proj-status", Static)
-        btn = self.query_one("#btn-sync-cloud", Button)
-
-        with _busy_button(self.app, btn, "Syncing…"):
-            self.app.call_from_thread(status.update, "[cyan]Syncing to cloud…[/]")
-            try:
-                from netpal.utils.persistence.project_persistence import push_project_to_s3
-
-                push_project_to_s3(project, self.app.config)
-
-                self.app.call_from_thread(
-                    status.update,
-                    f"[green]✔ Project '{project.name}' synced to cloud successfully.[/]",
-                )
-                self.app.call_from_thread(self._refresh_table)
-            except Exception as exc:
-                self.app.call_from_thread(
-                    status.update,
-                    f"[red]Sync error: {exc}[/]",
-                )
-
 
 # ------------ ASSETS VIEW --------------------------------------------------
 
@@ -1328,7 +1263,7 @@ class ReconView(VerticalScroll):
                     self.app.call_from_thread(log.write, line.rstrip())
 
                 def _save_proj():
-                    save_project_to_file(project, None)
+                    save_project_to_file(project)
 
                 def _save_find():
                     save_findings_to_file(project)
@@ -1714,7 +1649,7 @@ class ToolsView(VerticalScroll):
                     self.app.call_from_thread(log.write, line.rstrip())
 
                 def _save_proj():
-                    save_project_to_file(project, None)
+                    save_project_to_file(project)
 
                 def _save_find():
                     save_findings_to_file(project)
@@ -2160,7 +2095,7 @@ class EvidenceView(VerticalScroll):
                     for f in ai_findings:
                         project.add_finding(f)
                     ProjectPersistence.save_and_sync(
-                        project, None, save_findings=True
+                        project, save_findings=True
                     )
                     self.app.call_from_thread(
                         log.write,
@@ -2279,7 +2214,7 @@ class EvidenceView(VerticalScroll):
                 )
 
                 ProjectPersistence.save_and_sync(
-                    project, None, save_findings=True
+                    project, save_findings=True
                 )
 
             except Exception as exc:
@@ -2345,8 +2280,6 @@ class SettingsView(VerticalScroll):
 
         if _save_config(parsed):
             self.app.config = parsed
-            # Invalidate cached AWS availability since config changed
-            self.app._aws_available = None
             status.update("[bold green]✔ Configuration saved successfully.[/]")
         else:
             status.update("[bold red]Failed to write config file.[/]")
@@ -2382,16 +2315,6 @@ class NetPalApp(App):
         # Load config early so child widgets can access it during on_mount
         self.config: dict = _load_config()
         self._current_view: str = VIEW_PROJECTS
-        # Issue 13: lazily cached AWS availability flag
-        self._aws_available: bool | None = None
-
-    @property
-    def aws_available(self) -> bool:
-        """Cached check for AWS sync availability (config doesn't change mid-session)."""
-        if self._aws_available is None:
-            from netpal.utils.aws.aws_utils import is_aws_sync_available
-            self._aws_available = is_aws_sync_available(self.config)
-        return self._aws_available
 
     def compose(self) -> ComposeResult:
         yield Header()

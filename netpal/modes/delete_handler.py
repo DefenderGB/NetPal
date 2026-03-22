@@ -88,36 +88,6 @@ class DeleteHandler(ModeHandler):
             return False
 
         try:
-            # Delete cloud files first if project had cloud_sync enabled
-            if project and project.cloud_sync:
-                try:
-                    from ..utils.aws.aws_utils import is_aws_sync_available, create_safe_boto3_session
-                    from ..services.aws.operations import S3Operations
-                    from ..services.aws.registry import RegistryManager
-
-                    if is_aws_sync_available(self.config):
-                        aws_profile = self.config.get("aws_sync_profile", "").strip()
-                        aws_account = self.config.get("aws_sync_account", "").strip()
-                        bucket_name = self.config.get("aws_sync_bucket", f"netpal-{aws_account}")
-
-                        session = create_safe_boto3_session(aws_profile)
-                        region = session.region_name or "us-west-2"
-                        s3_ops = S3Operations(aws_profile, region, bucket_name)
-                        registry = RegistryManager(aws_profile, region, bucket_name)
-
-                        # Delete all project files from S3 (data, findings, scan dir)
-                        deleted_count = s3_ops.delete_s3_prefix(project_id)
-
-                        # Mark deleted in S3 registry (keeps projects.json intact)
-                        registry.mark_project_deleted_in_s3(project_id)
-
-                        print(f"{Fore.GREEN}✔ Deleted {deleted_count} cloud file(s) for project{Style.RESET_ALL}")
-                    else:
-                        print(f"{Fore.YELLOW}[WARNING] AWS sync not available — skipping cloud deletion{Style.RESET_ALL}")
-                except Exception as cloud_exc:
-                    print(f"{Fore.YELLOW}[WARNING] Cloud deletion failed: {cloud_exc}{Style.RESET_ALL}")
-                    print(f"{Fore.YELLOW}  Local files will still be deleted.{Style.RESET_ALL}")
-
             delete_project_locally(project_id)
             print(f"\n{Fore.GREEN}✔ Project '{name}' deleted successfully.{Style.RESET_ALL}")
 

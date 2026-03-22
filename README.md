@@ -55,26 +55,27 @@ An alternative interactive terminal UI is also available via `netpal interactive
 
 The TUI can also be served as a web application in the browser via `netpal website` (uses `textual-serve` on port 7123).
 
-```
-usage: netpal [-h] [-s] [-ns] [-p PROJECT] [-v] [-c CONFIG] {init,list,set,rename,assets,recon,ai-review,ai-report-enhance,setup,findings,hosts,pull,delete,interactive,website,auto} ...
+```text
+usage: netpal [-h] [-p PROJECT] [-v] [-c CONFIG] {init,list,set,project-edit,assets,recon,recon-tools,ai-review,ai-report-enhance,setup,findings,hosts,export,delete,interactive,website,auto} ...
 
 NetPal — Automated Network Penetration Testing CLI Tool
 
 positional arguments:
-  {init,list,set,rename,assets,recon,ai-review,ai-report-enhance,setup,findings,hosts,pull,delete,interactive,website,auto}
+  {init,list,set,project-edit,assets,recon,recon-tools,ai-review,ai-report-enhance,setup,findings,hosts,export,delete,interactive,website,auto}
                         Available commands
     init                Create a new project and set it as active
-    list                List all projects (local and S3)
+    list                List all local projects
     set                 Switch the active project
-    rename              Rename an existing project
+    project-edit        Interactively edit the active project
     assets              Create and manage assets (networks, hosts, credentials)
     recon               Run reconnaissance and scanning workflows
+    recon-tools         List targets or run exploit tools against discovered hosts
     ai-review           AI-powered review and analysis of scan results
     ai-report-enhance   AI enhancement of existing findings
     setup               Interactive configuration wizard
     findings            View and manage security findings
     hosts               View discovered hosts, services, and evidence
-    pull                Pull projects from AWS S3
+    export              Export project scan results as a zip archive
     delete              Delete a project and all its resources
     interactive         Launch the Textual-based interactive TUI
     website             Serve the Textual TUI as a web application
@@ -82,8 +83,6 @@ positional arguments:
 
 options:
   -h, --help            show this help message and exit
-  -s, --sync            Enable AWS S3 sync
-  -ns, --no-sync        Disable AWS S3 sync
   -p PROJECT, --project PROJECT
                         Override active project name
   -v, --verbose         Enable verbose output
@@ -158,26 +157,24 @@ netpal findings
 netpal hosts
 ```
 
-### Collaborating Workflow
+### Managing Local Projects
 
 ```bash
-# 1. Configure AWS netpal-user profile
-aws configure set aws_access_key_id \"YOUR_KEY\" --profile netpal-user
-aws configure set aws_secret_access_key \"YOUR_SECRET\" --profile netpal-user
-ws configure set region us-west-2 --profile netpal-user
-netpal --config '{"aws_sync_account": "123456789012", "aws_sync_profile": "netpal-user"}'
+# List projects stored on disk
+netpal list
 
-# 2. Pull project from S3
-netpal pull # To get project name or ID
-netpal pull -id "NETP-2002-ABCD"
+# Switch active project
+netpal set "My Pentest"
 
-# 3. Set project as your primary
-netpal set "NETP-2002-ABCD"
+# Update the active project's name or external tracking ID
+netpal project-edit
 
-# 4. View hosts/findings
+# View hosts/findings
 netpal hosts
 netpal findings
-netpalui # or use flask app to view hosts and findings
+
+# Export a project archive from local scan_results/
+netpal export "My Pentest"
 ```
 
 ## Scan Types
@@ -194,20 +191,13 @@ netpalui # or use flask app to view hosts and findings
 
 ## AI Providers
 
-NetPal supports AWS Bedrock, Anthropic, OpenAI, Ollama, Azure OpenAI, and Google Gemini. Configure through `netpal setup` or directly in `config.json`.
+NetPal supports AWS Bedrock, Anthropic, OpenAI, Ollama, Azure OpenAI, and Google Gemini. Configure your provider through `netpal setup` or directly in `config.json`.
 
-## AWS S3 Sync
+For AWS Bedrock, use `ai_type: "aws"` plus the Bedrock settings such as `ai_aws_profile`, `ai_aws_region`, and `ai_aws_model`.
 
-Enable cloud sync for collaborative testing. Projects sync automatically after each phase.
+## Local Storage
 
-```bash
-# Pull projects from S3
-netpal pull --all
-netpal pull --id <project-uuid>
-
-# Update config for AWS
-netpal --config '{"aws_sync_account": "123456789012", "aws_sync_profile": "netpal-user"}'
-```
+NetPal now stores projects, findings, and evidence locally under `scan_results/`. On startup it also removes legacy cloud-sync metadata from existing `config.json`, `scan_results/projects.json`, and local project JSON files.
 
 ## Results Structure
 

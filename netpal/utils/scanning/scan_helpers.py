@@ -1,6 +1,6 @@
 """
 Scan execution helper utilities for NetPal.
-Handles scan execution, notification, and AWS sync operations.
+Handles scan execution, notification, and local result persistence.
 """
 import os
 import time

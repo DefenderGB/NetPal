@@ -158,7 +158,7 @@ class ReconToolsHandler(ModeHandler):
             print(line, end='', flush=True)
 
         def _save_project():
-            save_project_to_file(self.project, self.aws_sync)
+            save_project_to_file(self.project)
 
         def _save_findings():
             save_findings_to_file(self.project)
@@ -193,9 +193,7 @@ class ReconToolsHandler(ModeHandler):
         pass  # Saved within workflow via callbacks
 
     def sync_if_enabled(self):
-        from ..utils.persistence.project_persistence import sync_to_s3_if_enabled
-        if self.project and self.project.cloud_sync:
-            sync_to_s3_if_enabled(self.aws_sync, self.project)
+        pass
 
     def display_completion(self, result):
         print(f"\n{Fore.GREEN}[SUCCESS] Exploit tools complete!{Style.RESET_ALL}\n")

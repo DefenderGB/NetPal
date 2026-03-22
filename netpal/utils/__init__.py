@@ -4,7 +4,7 @@ Sub-packages:
 - scanning/  — scan execution helpers and recon orchestration
 - persistence/ — file I/O, project paths, persistence, project management
 - display/ — UI display helpers, finding viewers, next-command suggestions
-- aws/ — AWS session management and S3 pull/sync utilities
+- aws/ — AWS session helpers for AI providers
 """
 
 from .config_loader import ConfigLoader, handle_config_update

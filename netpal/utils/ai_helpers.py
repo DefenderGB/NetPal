@@ -204,7 +204,7 @@ def default_ai_progress_callback(event_type, data):
             print(f"  {Fore.YELLOW}✓ No findings identified{Style.RESET_ALL}\n")
 
 
-def run_ai_reporting_phase(project, config, aws_sync=None):
+def run_ai_reporting_phase(project, config):
     """Run AI-powered finding analysis and reporting."""
     from ..services.ai.analyzer import AIAnalyzer
     from .display.display_utils import display_ai_provider_info

@@ -13,7 +13,7 @@ class Project:
     Represents a penetration testing project/engagement.
     """
     
-    def __init__(self, name, project_id=None, external_id="", cloud_sync=False):
+    def __init__(self, name, project_id=None, external_id=""):
         """
         Initialize a Project.
         
@@ -21,7 +21,6 @@ class Project:
             name: Project name (unique identifier)
             project_id: Unique project ID in NETP-YYMM-XXXX format (generated if not provided)
             external_id: External tracking ID (optional, defaults to empty string)
-            cloud_sync: Whether this project is synced to S3 (optional, defaults to False)
         """
         if project_id:
             self.project_id = project_id
@@ -30,7 +29,6 @@ class Project:
             self.project_id = generate_project_id()
         self.name = name
         self.external_id = external_id
-        self.cloud_sync = cloud_sync
         self.assets = []
         self.hosts = []
         self.findings = []
@@ -194,7 +192,6 @@ class Project:
             "id": self.project_id,
             "name": self.name,
             "external_id": self.external_id,
-            "cloud_sync": self.cloud_sync,
             "assets": [asset.to_dict() for asset in self.assets],
             "hosts": [host.to_dict() for host in self.hosts],
             "modified_utc_ts": self.modified_utc_ts
@@ -206,8 +203,7 @@ class Project:
         project = cls(
             name=data.get("name"),
             project_id=data.get("id"),
-            external_id=data.get("external_id", ""),
-            cloud_sync=data.get("cloud_sync", False)
+            external_id=data.get("external_id", "")
         )
         
         # Load assets
@@ -236,13 +232,10 @@ class Project:
         
         return project
     
-    def save_to_file(self, aws_sync=None):
+    def save_to_file(self):
         """
         Save project to file and update registry.
-        
-        Args:
-            aws_sync: Optional AwsSyncService instance for S3 synchronization
-        
+
         Returns:
             True if successful
         """
@@ -256,8 +249,7 @@ class Project:
         success = save_json(project_path, self.to_dict(), compact=False)
         
         if success:
-            # Register/update in projects registry (include external_id, cloud_sync, and aws_sync for S3 merge)
-            register_project(self.project_id, self.name, self.modified_utc_ts, self.external_id, self.cloud_sync, aws_sync)
+            register_project(self.project_id, self.name, self.modified_utc_ts, self.external_id)
         
         return success
     
@@ -302,7 +294,7 @@ class Project:
         # Create project from data
         project = cls.from_dict(data)
         
-        # Ensure registry is up-to-date (no aws_sync needed during load, only during save)
-        register_project(project.project_id, project.name, project.modified_utc_ts, project.external_id, project.cloud_sync, aws_sync=None)
+        # Ensure registry is up-to-date.
+        register_project(project.project_id, project.name, project.modified_utc_ts, project.external_id)
         
         return project

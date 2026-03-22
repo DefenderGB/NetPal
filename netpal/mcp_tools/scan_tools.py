@@ -15,7 +15,6 @@ def _build_shim(nctx, project, scanner):
     shim.config = nctx.config
     shim.project = project
     shim.scanner = scanner
-    shim.aws_sync = nctx.aws_sync
     shim.running = True
     shim.tool_runner = None
     shim._output_callback = lambda line: None
@@ -77,9 +76,7 @@ def register_scan_tools(mcp):
         from ..services.nmap.scanner import NmapScanner
         from ..utils.scanning.recon_executor import execute_recon_with_tools
         from ..utils.scanning.scan_helpers import run_discovery_phase
-        from ..utils.persistence.project_persistence import (
-            save_project_to_file, sync_to_s3_if_enabled,
-        )
+        from ..utils.persistence.project_persistence import save_project_to_file
 
         nctx = get_netpal_ctx(ctx)
 
@@ -167,8 +164,7 @@ def register_scan_tools(mcp):
             if hosts:
                 for h in hosts:
                     project.add_host(h, asset_obj.asset_id)
-                save_project_to_file(project, nctx.aws_sync)
-                sync_to_s3_if_enabled(nctx.aws_sync, project)
+                save_project_to_file(project)
 
             host_count = len(hosts) if hosts else 0
             host_ips_list = [h.ip for h in hosts] if hosts else []
@@ -305,7 +301,7 @@ def register_scan_tools(mcp):
         tool_runner = ToolRunner(project.project_id, nctx.config)
 
         def _save_project():
-            save_project_to_file(project, nctx.aws_sync)
+            save_project_to_file(project)
 
         def _save_findings():
             save_findings_to_file(project)

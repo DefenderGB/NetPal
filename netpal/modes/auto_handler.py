@@ -24,7 +24,6 @@ class AutoHandler(ModeHandler):
         self.config = netpal_instance.config
         self.project = None
         self.scanner = None
-        self.aws_sync = netpal_instance.aws_sync
         self.args = args
 
     # ── Template-method steps ──────────────────────────────────────────
@@ -85,13 +84,9 @@ class AutoHandler(ModeHandler):
 
     def execute_workflow(self, context):
         from ..models.project import Project
-        from ..utils.persistence.file_utils import (
-            register_project, list_registered_projects,
-        )
+        from ..utils.persistence.file_utils import list_registered_projects
         from ..utils.config_loader import ConfigLoader
-        from ..utils.persistence.project_persistence import (
-            save_project_to_file, sync_to_s3_if_enabled,
-        )
+        from ..utils.persistence.project_persistence import save_project_to_file
         from ..utils.asset_factory import AssetFactory
         from ..utils.scanning.recon_executor import execute_recon_with_tools
         from ..utils.scanning.scan_helpers import run_discovery_phase
@@ -124,16 +119,8 @@ class AutoHandler(ModeHandler):
                 # Create new project with the given name
                 ext_id = context.get('external_id', '')
                 print(f"{Fore.CYAN}[AUTO] Creating project: {project_name}{Style.RESET_ALL}")
-                project = Project(name=project_name, external_id=ext_id, cloud_sync=False)
-                save_project_to_file(project, self.aws_sync)
-                register_project(
-                    project_id=project.project_id,
-                    project_name=project.name,
-                    updated_utc_ts=project.modified_utc_ts,
-                    external_id=ext_id,
-                    cloud_sync=False,
-                    aws_sync=self.aws_sync,
-                )
+                project = Project(name=project_name, external_id=ext_id)
+                save_project_to_file(project)
                 ConfigLoader.update_config_project_name(project_name)
                 self.config['project_name'] = project_name
         else:
@@ -148,16 +135,8 @@ class AutoHandler(ModeHandler):
             ext_id = context.get('external_id', '')
             project_name = candidate
             print(f"{Fore.CYAN}[AUTO] Creating project: {project_name}{Style.RESET_ALL}")
-            project = Project(name=project_name, external_id=ext_id, cloud_sync=False)
-            save_project_to_file(project, self.aws_sync)
-            register_project(
-                project_id=project.project_id,
-                project_name=project.name,
-                updated_utc_ts=project.modified_utc_ts,
-                external_id=ext_id,
-                cloud_sync=False,
-                aws_sync=self.aws_sync,
-            )
+            project = Project(name=project_name, external_id=ext_id)
+            save_project_to_file(project)
             ConfigLoader.update_config_project_name(project_name)
             self.config['project_name'] = project_name
 
@@ -198,7 +177,7 @@ class AutoHandler(ModeHandler):
                 project_id=project.project_id,
             )
             project.add_asset(asset)
-            save_project_to_file(project, self.aws_sync)
+            save_project_to_file(project)
             assets.append(asset)
             print(f"{Fore.GREEN}[AUTO] Created asset: {asset_name} → {cidr}{Style.RESET_ALL}")
 
@@ -210,7 +189,7 @@ class AutoHandler(ModeHandler):
                 project_id=project.project_id,
             )
             project.add_asset(asset)
-            save_project_to_file(project, self.aws_sync)
+            save_project_to_file(project)
             assets.append(asset)
             print(f"{Fore.GREEN}[AUTO] Created asset: {asset_name} → {file_path}{Style.RESET_ALL}")
 
@@ -245,8 +224,7 @@ class AutoHandler(ModeHandler):
             if hosts:
                 for host in hosts:
                     project.add_host(host, asset.asset_id)
-                save_project_to_file(project, self.aws_sync)
-                sync_to_s3_if_enabled(self.aws_sync, project)
+                save_project_to_file(project)
                 print(f"\n{Fore.GREEN}[AUTO] Discovered {len(hosts)} host(s) for {asset_label}{Style.RESET_ALL}\n")
                 any_hosts = True
             else:
@@ -330,4 +308,3 @@ class AutoHandler(ModeHandler):
                 ("  netpal ai-report-enhance     — enhance findings with AI", Fore.GREEN),
             ],
         )
-

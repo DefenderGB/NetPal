@@ -33,7 +33,7 @@ def register_finding_tools(mcp):
 
         if len(project.findings) < original_count:
             save_findings_to_file(project)
-            save_project_to_file(project, nctx.aws_sync)
+            save_project_to_file(project)
             return {
                 "finding_id": finding_id,
                 "deleted": True,
