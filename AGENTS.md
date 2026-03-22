@@ -79,7 +79,8 @@ uv run python -m netpal --help
 
 - `netpal/cli.py`: main CLI parser, dashboard, bootstrap, command routing
 - `netpal/__main__.py`: module entrypoint
-- `netpal/tui.py`: Textual TUI app and web-served TUI screens/views
+- `netpal/tui.py`: public Textual TUI shim and stable import surface
+- `netpal/textual_ui/`: internal Textual operator UI package (app, shared components, helpers, theme)
 - `netpal/mcp_server.py`: MCP server startup and tool/resource registration
 - `netpalui/app.py`: lightweight web UI app
 
@@ -186,11 +187,16 @@ Important rule: MCP should not expose cloud-storage tools.
 
 ### TUI And Web UI
 
-- `netpal/tui.py`: primary interactive UI
+- `netpal/tui.py`: primary interactive UI shim / module entrypoint
+- `netpal/textual_ui/app.py`: Textual app, screens, views
+- `netpal/textual_ui/components.py`: shared TUI primitives
+- `netpal/textual_ui/helpers.py`: shared TUI helper logic and view constants
+- `netpal/textual_ui/styles.tcss`: TUI theme
 - `netpalui/templates/`: HTML templates
 - `netpalui/static/style.css`: styling
 
 If project metadata changes, make sure badges/columns/forms stay in sync across TUI and web output.
+Important rule: TUI actions should reuse CLI modes/handlers/shared helpers whenever possible. Do not add parallel TUI-only backend logic if the CLI path can be reused or lightly generalized without changing normal CLI behavior.
 
 ### Display And UX Helpers
 

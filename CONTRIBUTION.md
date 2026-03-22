@@ -83,7 +83,13 @@ netpal/
 ├── __init__.py
 ├── __main__.py                    # Entry: calls cli.main()
 ├── cli.py                         # CLI parser, routing, dashboard, bootstrap
-├── tui.py                         # Interactive TUI (Textual) — netpal interactive
+├── tui.py                         # Public TUI shim / entrypoint — netpal interactive
+├── textual_ui/                    # Internal Textual operator UI package
+│   ├── app.py                     # App, modal, and view implementation
+│   ├── components.py              # Shared TUI primitives
+│   ├── helpers.py                 # Shared helpers and view constants
+│   ├── styles.tcss                # Dense operator theme
+│   └── theme.py                   # TCSS loader for exported APP_CSS
 ├── config/
 │   ├── config.json                # Runtime configuration
 │   ├── ai_prompts.json            # AI finding prompts
@@ -302,18 +308,23 @@ In the TUI, a "Re-run auto-tools" dropdown provides the same options (2 days, 7 
 4. Add config keys (e.g., `ai_my_token`, `ai_my_model`)
 5. Update the setup wizard in `netpal/utils/setup_wizard.py`
 
-## Interactive TUI (`tui.py`)
+## Interactive TUI (`tui.py` / `textual_ui/`)
 
 The TUI (`netpal interactive`) uses Textual and provides a state-driven, non-linear interface with project editing, assets, recon, tools, hosts, manual findings, AI enhancement, AD scan, testcase tracking, and settings. Views unlock progressively based on project state. Startup now fails fast if required runtime tools (`nmap` or Playwright/Chromium) are unavailable, and the project-creation modal can capture AD metadata plus optionally seed an initial asset from just an asset type and target.
 
+`netpal/tui.py` is the stable public shim for CLI entrypoints, tests, and `python -m netpal.tui`. The actual Textual implementation now lives under `netpal/textual_ui/`.
+
+Important implementation rule: treat the TUI as a presentation layer. Reuse existing CLI modes, handlers, and shared helpers whenever possible. If a TUI workflow needs reusable backend behavior that does not exist yet, add or adjust the shared CLI-side helper or handler interface first, but keep normal CLI behavior and UX unchanged.
+
 To add a new TUI view:
 
-1. Define a new view widget class extending `VerticalScroll` in `netpal/tui.py`
-2. Add a `VIEW_*` constant and entry in `VIEW_LABELS`
+1. Define the new view widget in `netpal/textual_ui/app.py` and prefer the shared primitives from `netpal/textual_ui/components.py`
+2. Add a `VIEW_*` constant and entry in `VIEW_LABELS` in `netpal/textual_ui/helpers.py`
 3. Mount the widget inside the `ContentSwitcher` in `NetPalApp.compose()`
 4. Add a key binding in `BINDINGS`
 5. Update `_allowed_views()` with any unlock conditions
 6. Add the view class to `_refresh_active_view()`
+7. Re-export anything public or test-facing through `netpal/tui.py` if needed
 
 ## Adding New Scan Types
 

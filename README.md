@@ -52,7 +52,7 @@ Running `netpal` with no arguments shows the project dashboard and suggests the 
 
 Each subcommand has its own `--help` — run `netpal <command> --help` for detailed options and examples.
 
-An alternative interactive terminal UI is also available via `netpal interactive` (requires the `textual` package, `nmap`, and a working Playwright Chromium install).
+An alternative interactive terminal UI is also available via `netpal interactive` (requires the `textual` package, `nmap`, and a working Playwright Chromium install). The current TUI is a dense operator-style dashboard built on Textual; its public entrypoint remains `netpal.tui`, while the internal implementation lives under `netpal/textual_ui/`.
 
 The TUI can also be served as a web application in the browser via `netpal website` (uses `textual-serve` on port 7123 and performs the same `nmap`/Playwright startup check).
 

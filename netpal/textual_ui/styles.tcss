@@ -1,0 +1,510 @@
+Screen {
+    background: #111827;
+    color: #e5e7eb;
+}
+
+#active-context {
+    dock: top;
+    height: 1;
+    padding: 0 1;
+    background: #0f172a;
+    color: #94a3b8;
+    text-style: bold;
+}
+
+#view-bar {
+    dock: top;
+    height: 3;
+    padding: 0 1;
+    background: #172033;
+    layout: horizontal;
+    border-bottom: solid #243147;
+}
+
+#view-bar .text-action {
+    min-width: 11;
+    height: 3;
+    margin: 0 1 0 0;
+    padding: 0 1;
+    background: #1b2740;
+    color: #93a4bc;
+}
+
+#view-bar .text-action.active-tab {
+    background: #28497a;
+    color: #f8fafc;
+    text-style: bold;
+}
+
+#view-bar .text-action.-disabled-tab {
+    background: #141c2d;
+    color: #64748b;
+}
+
+#main-switcher {
+    height: 1fr;
+}
+
+.view-container {
+    padding: 1 1;
+}
+
+.section-intro-row {
+    width: 1fr;
+    height: auto;
+    margin: 0 0 1 0;
+}
+
+.section-intro-title {
+    width: auto;
+    margin: 0 1 0 0;
+    color: #f8fafc;
+    text-style: bold;
+}
+
+.section-intro-text {
+    width: 1fr;
+    color: #94a3b8;
+}
+
+.section-title {
+    color: #f8fafc;
+    text-style: bold;
+}
+
+.panel-title {
+    color: #60a5fa;
+    text-style: bold;
+    margin: 0 0 1 0;
+}
+
+.info-text {
+    color: #94a3b8;
+}
+
+.metric-strip {
+    height: auto;
+    margin: 0 0 1 0;
+    padding: 0 1;
+    background: #162032;
+    color: #cbd5e1;
+    border: solid #25324a;
+}
+
+.split-layout {
+    layout: horizontal;
+    height: 1fr;
+}
+
+.primary-pane {
+    width: 60%;
+    min-width: 0;
+    margin: 0 1 0 0;
+}
+
+.secondary-pane {
+    width: 40%;
+    min-width: 28;
+}
+
+.task-layout {
+    layout: horizontal;
+    height: 1fr;
+}
+
+.task-form-pane {
+    width: 60%;
+    min-width: 0;
+    margin: 0 1 0 0;
+}
+
+.task-log-pane {
+    width: 40%;
+    min-width: 28;
+}
+
+.pane-box {
+    height: 1fr;
+    padding: 1 1;
+    background: #172033;
+    border: solid #2a3952;
+}
+
+.detail-pane {
+    height: 1fr;
+    padding: 1 1;
+    background: #172033;
+    border: solid #2a3952;
+}
+
+.detail-title {
+    margin: 0 0 1 0;
+    color: #60a5fa;
+    text-style: bold;
+}
+
+.detail-scroll {
+    height: 1fr;
+}
+
+.detail-body {
+    height: auto;
+    color: #dbe3ef;
+}
+
+.detail-log {
+    height: 1fr;
+    min-width: 0;
+    border: none;
+    padding: 0;
+    background: transparent;
+}
+
+.text-action {
+    width: auto;
+    height: 1;
+    min-width: 8;
+    margin: 0 1 0 0;
+    padding: 0 1;
+    background: #1b2740;
+    color: #dbe3ef;
+    text-style: bold;
+}
+
+.text-action:hover,
+.text-action:focus {
+    background: #253552;
+    color: #f8fafc;
+}
+
+.text-action.variant-default {
+    background: #1b2740;
+    color: #dbe3ef;
+}
+
+.text-action.variant-primary {
+    background: #183357;
+    color: #93c5fd;
+}
+
+.text-action.variant-success {
+    background: #15372f;
+    color: #86efac;
+}
+
+.text-action.variant-warning {
+    background: #433218;
+    color: #fcd34d;
+}
+
+.text-action.variant-error {
+    background: #402031;
+    color: #fda4af;
+}
+
+.text-action.is-disabled,
+.text-action:disabled {
+    background: #141c2d;
+    color: #64748b;
+}
+
+Select {
+    height: 1;
+    min-height: 1;
+    background: transparent;
+    border: none;
+    color: #e5e7eb;
+}
+
+Select > SelectCurrent {
+    height: 1;
+    min-height: 1;
+    padding: 0 1 0 0;
+    background: #1b2740;
+    color: #e5e7eb;
+    border: none !important;
+}
+
+Select > SelectCurrent > Static#label {
+    height: 1;
+    color: #94a3b8;
+    background: transparent;
+}
+
+Select > SelectCurrent.-has-value > Static#label {
+    color: #e5e7eb;
+}
+
+Select > SelectCurrent > .arrow {
+    width: 1;
+    padding: 0;
+    color: #93a4bc;
+}
+
+Select:hover > SelectCurrent,
+Select:focus > SelectCurrent {
+    background: #253552;
+    border: none !important;
+}
+
+Select.-expanded > SelectCurrent {
+    background: #243147;
+    border: none !important;
+}
+
+Select > SelectOverlay {
+    border: solid #334155;
+    background: #0b1120;
+    color: #e5e7eb;
+    max-height: 10;
+}
+
+Select > SelectOverlay:focus {
+    background: #0b1120;
+}
+
+Select > SelectOverlay > .option-list--option {
+    padding: 0 1;
+}
+
+.action-bar {
+    height: auto;
+    margin: 1 0 0 0;
+}
+
+.action-bar .text-action {
+    margin: 0 1 0 0;
+    min-width: 12;
+    height: 1;
+}
+
+.status-line {
+    height: auto;
+    margin: 1 0 0 0;
+    color: #94a3b8;
+}
+
+.status-block {
+    margin: 1 0 0 0;
+}
+
+.dense-form-grid {
+    height: auto;
+}
+
+.dense-form-grid > Horizontal {
+    height: auto;
+    margin: 0;
+}
+
+.dense-form-grid > Horizontal > Vertical {
+    min-width: 0;
+    margin: 0 2 0 0;
+}
+
+.form-card {
+    height: auto;
+    padding: 1 1;
+    margin: 0 0 1 0;
+    background: #172033;
+    border: solid #2a3952;
+}
+
+.compact-form Label {
+    margin: 1 0 1 0;
+    padding: 0;
+    color: #cbd5e1;
+}
+
+.compact-form > Horizontal > Vertical {
+    min-width: 0;
+    margin: 0 2 0 0;
+}
+
+.compact-form Input,
+.compact-form TextArea {
+    margin: 0;
+    background: #0f172a;
+    color: #e5e7eb;
+    border: solid #334155;
+}
+
+.compact-form Select {
+    margin: 0;
+}
+
+.compact-form Input {
+    height: 3;
+}
+
+.compact-form Select {
+    height: 1;
+    background: transparent;
+    border: none;
+}
+
+.compact-form TextArea {
+    min-height: 5;
+}
+
+.compact-form Horizontal,
+.compact-form Vertical,
+.compact-form VerticalScroll {
+    height: auto;
+    margin: 0;
+    padding: 0;
+}
+
+DataTable {
+    height: 1fr;
+    background: #0f172a;
+    color: #e5e7eb;
+    border: solid #334155;
+}
+
+.operator-table {
+    height: 1fr;
+}
+
+RichLog {
+    height: 1fr;
+    background: #0b1120;
+    color: #dbe3ef;
+    border: solid #334155;
+    padding: 1 1;
+}
+
+#findings-action-bar {
+    height: auto;
+    margin: 1 0 0 0;
+}
+
+#findings-table {
+    height: auto;
+    min-height: 8;
+    max-height: 30%;
+}
+
+#finding-detail-panel {
+    height: 1fr;
+}
+
+#hosts-detail-panel {
+    height: 1fr;
+}
+
+#settings-editor {
+    height: 1fr;
+    min-height: 20;
+    background: #0b1120;
+    color: #e5e7eb;
+    border: solid #334155;
+}
+
+#settings-toolbar {
+    height: auto;
+    margin: 0 0 1 0;
+}
+
+#settings-file-select {
+    width: 38;
+    max-width: 100%;
+}
+
+.standard-modal-screen {
+    align: center middle;
+    background: rgba(5, 10, 20, 0.65);
+}
+
+.modal-shell {
+    height: auto;
+    max-height: 90%;
+    padding: 1 2;
+    background: #172033;
+    border: solid #3b82f6;
+}
+
+.modal-wide {
+    width: 96;
+}
+
+.modal-narrow {
+    width: 56;
+}
+
+.modal-shell .action-bar {
+    margin-top: 1;
+}
+
+.modal-message {
+    margin: 0 0 1 0;
+    color: #cbd5e1;
+}
+
+.project-readonly {
+    height: 3;
+    padding: 1 0 0 0;
+    color: #94a3b8;
+}
+
+.starter-asset-suggestion,
+.file-suggestion {
+    height: 1;
+    margin: 0;
+    padding: 0 1;
+    color: #60a5fa;
+}
+
+.starter-asset-suggestion:hover,
+.file-suggestion:hover {
+    background: #1d4ed8;
+    color: #f8fafc;
+    text-style: bold;
+}
+
+#proof-container {
+    height: auto;
+    min-height: 8;
+    max-height: 12;
+    border: solid #334155;
+    background: #0f172a;
+    padding: 1 1;
+}
+
+#tc-edit-notes {
+    height: 6;
+}
+
+.layout-medium .split-layout,
+.layout-medium .task-layout,
+.layout-narrow .split-layout,
+.layout-narrow .task-layout {
+    layout: vertical;
+}
+
+.layout-medium .primary-pane,
+.layout-medium .secondary-pane,
+.layout-medium .task-form-pane,
+.layout-medium .task-log-pane,
+.layout-narrow .primary-pane,
+.layout-narrow .secondary-pane,
+.layout-narrow .task-form-pane,
+.layout-narrow .task-log-pane {
+    width: 1fr;
+    height: auto;
+    min-height: 0;
+    margin: 0 0 1 0;
+}
+
+.layout-medium .detail-pane,
+.layout-medium .pane-box,
+.layout-narrow .detail-pane,
+.layout-narrow .pane-box {
+    height: auto;
+    max-height: 18;
+}
+
+Footer {
+    background: #0f172a;
+    color: #93a4bc;
+}
