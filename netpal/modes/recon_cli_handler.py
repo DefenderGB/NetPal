@@ -30,6 +30,7 @@ class ReconCLIHandler(ModeHandler):
         print(f"\n{Fore.CYAN}  ▸ Recon — {scan_label.upper()} → {target_label}{Style.RESET_ALL}\n")
     
     def validate_prerequisites(self) -> bool:
+        from ..utils.config_loader import ConfigLoader
         from ..utils.tool_paths import check_tools
         from ..utils.validation import check_sudo
         
@@ -90,7 +91,7 @@ class ReconCLIHandler(ModeHandler):
                 print(f"{Fore.RED}[ERROR] Asset '{self.args.asset}' not found{Style.RESET_ALL}")
                 return False
             self._host_ips = [
-                h.ip for h in self.project.hosts
+                h.scan_target for h in self.project.hosts
                 if self.asset.asset_id in h.assets
             ]
             if not self._host_ips:
@@ -101,7 +102,7 @@ class ReconCLIHandler(ModeHandler):
 
         elif self._target_mode == 'discovered':
             # Collect all discovered host IPs
-            self._host_ips = [h.ip for h in self.project.hosts]
+            self._host_ips = [h.scan_target for h in self.project.hosts]
             if not self._host_ips:
                 print(f"{Fore.RED}[ERROR] No discovered hosts found in project{Style.RESET_ALL}")
                 print(f"{Fore.YELLOW}[TIP] Run discovery first: netpal recon --asset <ASSET> --type nmap-discovery{Style.RESET_ALL}")
@@ -128,6 +129,12 @@ class ReconCLIHandler(ModeHandler):
         
         if self.args.scan_type == 'custom' and not self.args.nmap_options:
             print(f"{Fore.RED}[ERROR] --nmap-options required for custom scan type{Style.RESET_ALL}")
+            return False
+
+        if ConfigLoader.is_discovery_scan(self.args.scan_type) and self._target_mode != 'asset':
+            print(
+                f"{Fore.YELLOW}[INFO] Discovery scans require --asset without --discovered or --host.{Style.RESET_ALL}"
+            )
             return False
 
         return True
@@ -191,19 +198,21 @@ class ReconCLIHandler(ModeHandler):
         target_mode = context['target_mode']
         host_ips = context['host_ips']
         
-        if scan_type == 'nmap-discovery' and target_mode == 'asset':
+        from ..utils.config_loader import ConfigLoader
+
+        if ConfigLoader.is_discovery_scan(scan_type) and target_mode == 'asset':
             # Discovery scan (only makes sense with an asset)
             verbose = self.args.verbose if hasattr(self.args, 'verbose') else False
-            hosts = self.netpal.run_discovery(asset, speed=context['speed'], verbose=verbose)
+            hosts = self.netpal.run_discovery(
+                asset,
+                speed=context['speed'],
+                verbose=verbose,
+                scan_type=scan_type,
+            )
             if hosts:
                 print(f"\n{Fore.GREEN}[SUCCESS] Discovered {len(hosts)} host(s){Style.RESET_ALL}")
             return True
         
-        if scan_type == 'nmap-discovery' and target_mode != 'asset':
-            print(f"{Fore.YELLOW}[INFO] Discovery scan requires --asset (without --discovered). "
-                  f"Use a service scan type (e.g. top100) with --discovered or --host.{Style.RESET_ALL}")
-            return False
-
         # Recon scan
         from ..utils.scanning.recon_executor import execute_recon_with_tools
         
@@ -236,7 +245,9 @@ class ReconCLIHandler(ModeHandler):
     
     def suggest_next_command(self, result):
         scan_type = self.args.scan_type
-        if scan_type == 'nmap-discovery':
+        from ..utils.config_loader import ConfigLoader
+
+        if ConfigLoader.is_discovery_scan(scan_type):
             NextCommandSuggester.suggest('discovery_complete', self.project, self.args)
         else:
             NextCommandSuggester.suggest('recon_complete', self.project, self.args)

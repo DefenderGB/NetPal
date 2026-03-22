@@ -96,11 +96,21 @@ def check_nuclei_installed():
 
 
 def check_playwright_installed():
-    """Check if Playwright is installed."""
+    """Check if Playwright and its Chromium browser are installed and usable."""
     try:
-        from playwright.sync_api import sync_playwright  # noqa: F401
-        return True
+        from playwright.sync_api import sync_playwright
     except ImportError:
+        return False
+    try:
+        with sync_playwright() as pw:
+            executable_path = pw.chromium.executable_path
+            if not executable_path or not os.path.isfile(executable_path):
+                return False
+
+            browser = pw.chromium.launch(headless=True)
+            browser.close()
+            return True
+    except Exception:
         return False
 
 

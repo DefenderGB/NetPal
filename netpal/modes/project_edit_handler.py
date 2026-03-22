@@ -67,6 +67,13 @@ class ProjectEditHandler(ModeHandler):
         project_id = match['id']
         old_name = match.get('name', '')
         old_ext_id = match.get('external_id', '')
+        old_ad_domain = match.get('ad_domain', '')
+        old_ad_dc_ip = match.get('ad_dc_ip', '')
+
+        project_path = get_project_path(project_id)
+        project_data = load_json(project_path) or {}
+        old_metadata = project_data.get('metadata', {}) or {}
+        old_description = old_metadata.get('description', '')
 
         changed = False
 
@@ -94,16 +101,49 @@ class ProjectEditHandler(ModeHandler):
         if new_ext_id != old_ext_id:
             changed = True
 
+        desc_prompt = (
+            f"{Fore.CYAN}Change Project Description? (Current: {old_description or '(none)'}): {Style.RESET_ALL}"
+        )
+        new_description = input(desc_prompt).strip()
+        if not new_description:
+            new_description = old_description
+        if new_description != old_description:
+            changed = True
+
+        ad_domain_prompt = (
+            f"{Fore.CYAN}Change AD Domain? (Current: {old_ad_domain or '(none)'}): {Style.RESET_ALL}"
+        )
+        new_ad_domain = input(ad_domain_prompt).strip()
+        if not new_ad_domain:
+            new_ad_domain = old_ad_domain
+        if new_ad_domain != old_ad_domain:
+            changed = True
+
+        dc_ip_prompt = (
+            f"{Fore.CYAN}Change Domain Controller IP? (Current: {old_ad_dc_ip or '(none)'}): {Style.RESET_ALL}"
+        )
+        new_ad_dc_ip = input(dc_ip_prompt).strip()
+        if not new_ad_dc_ip:
+            new_ad_dc_ip = old_ad_dc_ip
+        if new_ad_dc_ip != old_ad_dc_ip:
+            changed = True
+
         if not changed:
             print(f"\n{Fore.YELLOW}[INFO] No changes made.{Style.RESET_ALL}")
             return True
 
         # ── Update the project JSON file ────────────────────────────────
-        project_path = get_project_path(project_id)
-        project_data = load_json(project_path)
         if project_data:
             project_data['name'] = new_name
             project_data['external_id'] = new_ext_id
+            project_data['ad_domain'] = new_ad_domain
+            project_data['ad_dc_ip'] = new_ad_dc_ip
+            metadata = project_data.get('metadata', {}) or {}
+            if new_description:
+                metadata['description'] = new_description
+            else:
+                metadata.pop('description', None)
+            project_data['metadata'] = metadata
             project_data['modified_utc_ts'] = int(time.time())
             save_json(project_path, project_data, compact=False)
 
@@ -113,6 +153,9 @@ class ProjectEditHandler(ModeHandler):
             if entry.get('id') == project_id:
                 entry['name'] = new_name
                 entry['external_id'] = new_ext_id
+                entry['ad_domain'] = new_ad_domain
+                entry['ad_dc_ip'] = new_ad_dc_ip
+                entry['metadata'] = project_data.get('metadata', {})
                 entry['updated_utc_ts'] = int(time.time())
                 break
         save_projects_registry(registry)
@@ -134,6 +177,18 @@ class ProjectEditHandler(ModeHandler):
             print(f"  External-ID : {old_ext_id or '(none)'} → {new_ext_id or '(none)'}")
         elif new_ext_id:
             print(f"  External-ID : {new_ext_id}")
+        if new_description != old_description:
+            print(f"  Description : {old_description or '(none)'} → {new_description or '(none)'}")
+        elif new_description:
+            print(f"  Description : {new_description}")
+        if new_ad_domain != old_ad_domain:
+            print(f"  AD Domain   : {old_ad_domain or '(none)'} → {new_ad_domain or '(none)'}")
+        elif new_ad_domain:
+            print(f"  AD Domain   : {new_ad_domain}")
+        if new_ad_dc_ip != old_ad_dc_ip:
+            print(f"  DC IP       : {old_ad_dc_ip or '(none)'} → {new_ad_dc_ip or '(none)'}")
+        elif new_ad_dc_ip:
+            print(f"  DC IP       : {new_ad_dc_ip}")
         print()
 
         return True

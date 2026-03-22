@@ -13,7 +13,15 @@ class Project:
     Represents a penetration testing project/engagement.
     """
     
-    def __init__(self, name, project_id=None, external_id=""):
+    def __init__(
+        self,
+        name,
+        project_id=None,
+        external_id="",
+        ad_domain="",
+        ad_dc_ip="",
+        metadata=None,
+    ):
         """
         Initialize a Project.
         
@@ -21,6 +29,9 @@ class Project:
             name: Project name (unique identifier)
             project_id: Unique project ID in NETP-YYMM-XXXX format (generated if not provided)
             external_id: External tracking ID (optional, defaults to empty string)
+            ad_domain: Active Directory domain (optional)
+            ad_dc_ip: Domain Controller IP or hostname (optional)
+            metadata: Arbitrary metadata dictionary (optional)
         """
         if project_id:
             self.project_id = project_id
@@ -29,10 +40,27 @@ class Project:
             self.project_id = generate_project_id()
         self.name = name
         self.external_id = external_id
+        self.ad_domain = ad_domain
+        self.ad_dc_ip = ad_dc_ip
+        self.metadata = metadata if metadata is not None else {}
         self.assets = []
         self.hosts = []
         self.findings = []
         self.modified_utc_ts = int(time.time())
+
+    @property
+    def description(self) -> str:
+        """Project description stored inside metadata for portability."""
+        return (self.metadata or {}).get("description", "")
+
+    @description.setter
+    def description(self, value: str) -> None:
+        if self.metadata is None:
+            self.metadata = {}
+        if value:
+            self.metadata["description"] = value
+        else:
+            self.metadata.pop("description", None)
     
     def add_asset(self, asset: Asset):
         """
@@ -88,8 +116,8 @@ class Project:
             host: Host object to add
             asset_id: Asset ID to associate with this host
         """
-        # Check if host already exists by IP
-        existing = self.get_host_by_ip(host.ip)
+        # Network-aware deduplication: match on (IP, network_id)
+        existing = self.get_host_by_identity(host.ip, host.network_id)
         
         if existing:
             # Merge services
@@ -115,6 +143,8 @@ class Project:
                 existing.hostname = host.hostname
             if not existing.os and host.os:
                 existing.os = host.os
+            if host.metadata:
+                existing.metadata.update(host.metadata)
         else:
             # New host - assign ID and add
             if host.host_id is None:
@@ -156,18 +186,47 @@ class Project:
     
     def get_host_by_ip(self, ip: str) -> Optional[Host]:
         """
-        Get host by IP address.
+        Get host by IP address (backward compatibility).
         
         Args:
             ip: IP address to search for
             
         Returns:
-            Host object or None if not found
+            First matching host object or None if not found
         """
         for host in self.hosts:
             if host.ip == ip:
                 return host
         return None
+
+    def get_host_by_identity(self, ip: str, network_id: str = "unknown") -> Optional[Host]:
+        """
+        Get host by composite identity (IP + network_id).
+
+        Args:
+            ip: IP address to search for
+            network_id: Network context identifier
+
+        Returns:
+            Host object or None if not found
+        """
+        normalized_network_id = network_id or "unknown"
+        for host in self.hosts:
+            if host.ip == ip and (host.network_id or "unknown") == normalized_network_id:
+                return host
+        return None
+
+    def get_hosts_by_ip(self, ip: str) -> list[Host]:
+        """
+        Get all hosts that share the same IP.
+
+        Args:
+            ip: IP address to search for
+
+        Returns:
+            List of matching hosts
+        """
+        return [host for host in self.hosts if host.ip == ip]
     
     def add_finding(self, finding: Finding):
         """
@@ -192,6 +251,9 @@ class Project:
             "id": self.project_id,
             "name": self.name,
             "external_id": self.external_id,
+            "ad_domain": self.ad_domain,
+            "ad_dc_ip": self.ad_dc_ip,
+            "metadata": self.metadata,
             "assets": [asset.to_dict() for asset in self.assets],
             "hosts": [host.to_dict() for host in self.hosts],
             "modified_utc_ts": self.modified_utc_ts
@@ -203,7 +265,10 @@ class Project:
         project = cls(
             name=data.get("name"),
             project_id=data.get("id"),
-            external_id=data.get("external_id", "")
+            external_id=data.get("external_id", ""),
+            ad_domain=data.get("ad_domain", ""),
+            ad_dc_ip=data.get("ad_dc_ip", ""),
+            metadata=data.get("metadata", {}),
         )
         
         # Load assets
@@ -249,7 +314,15 @@ class Project:
         success = save_json(project_path, self.to_dict(), compact=False)
         
         if success:
-            register_project(self.project_id, self.name, self.modified_utc_ts, self.external_id)
+            register_project(
+                self.project_id,
+                self.name,
+                self.modified_utc_ts,
+                external_id=self.external_id,
+                ad_domain=self.ad_domain,
+                ad_dc_ip=self.ad_dc_ip,
+                metadata=self.metadata,
+            )
         
         return success
     
@@ -295,6 +368,14 @@ class Project:
         project = cls.from_dict(data)
         
         # Ensure registry is up-to-date.
-        register_project(project.project_id, project.name, project.modified_utc_ts, project.external_id)
-        
+        register_project(
+            project.project_id,
+            project.name,
+            project.modified_utc_ts,
+            external_id=project.external_id,
+            ad_domain=project.ad_domain,
+            ad_dc_ip=project.ad_dc_ip,
+            metadata=project.metadata,
+        )
+
         return project

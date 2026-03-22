@@ -12,6 +12,16 @@
 <div class="container">
     <h1>{{ project.name }}</h1>
     <p class="text-muted">{{ project_id }}{% if project.external_id %} · {{ project.external_id }}{% endif %}</p>
+    {% if project_description %}
+    <p>{{ project_description }}</p>
+    {% endif %}
+    {% if project.ad_domain or project.ad_dc_ip %}
+    <p class="text-muted">
+        {% if project.ad_domain %}AD: {{ project.ad_domain }}{% endif %}
+        {% if project.ad_domain and project.ad_dc_ip %} · {% endif %}
+        {% if project.ad_dc_ip %}DC: {{ project.ad_dc_ip }}{% endif %}
+    </p>
+    {% endif %}
 
     {# --- Metrics --- #}
     <div class="metrics-row">
@@ -75,6 +85,9 @@
                 <h3>🖥️ {{ host.ip }}</h3>
                 {% if host.hostname %}
                 <p class="host-hostname">{{ host.hostname }}</p>
+                {% endif %}
+                {% if host.network_id and host.network_id != "unknown" %}
+                <p class="text-muted">Network: {{ host.network_id }}</p>
                 {% endif %}
                 {% if host.os %}
                 <p class="text-muted">OS: {{ host.os }}</p>
@@ -159,6 +172,9 @@
                     {% if f.host_hostname %}
                     <span>Hostname: {{ f.host_hostname }}</span>
                     {% endif %}
+                    {% if f.host_network_id and f.host_network_id != "unknown" %}
+                    <span>Network: {{ f.host_network_id }}</span>
+                    {% endif %}
                     <span>Port: {{ f.port }}</span>
                     {% if f.cwe %}
                     <span>CWE: {{ f.cwe }}</span>
@@ -190,7 +206,7 @@
                 <div class="finding-section">
                     <h4>Proof Files</h4>
                     <div class="proof-file-links">
-                        {% for pf in f.proof_file.split(', ') %}
+                        {% for pf in f.proof_file.split(',') %}
                         {% set pf_trimmed = pf.strip() %}
                         {% if pf_trimmed %}
                         <a href="{{ url_for('serve_file', filepath=pf_trimmed) }}" target="_blank" class="proof-link">📎 {{ pf_trimmed.split('/')[-1] }}</a>

@@ -10,7 +10,7 @@ class NmapXmlParser:
     """Parses nmap XML output into Host objects."""
     
     @staticmethod
-    def parse_xml_file(xml_path):
+    def parse_xml_file(xml_path, network_id="unknown"):
         """
         Parse nmap XML file into Host objects.
         
@@ -23,13 +23,13 @@ class NmapXmlParser:
         try:
             with open(xml_path, 'r') as f:
                 xml_content = f.read()
-            return NmapXmlParser.parse_xml_string(xml_content)
+            return NmapXmlParser.parse_xml_string(xml_content, network_id)
         except Exception as e:
             print(f"Error parsing XML file {xml_path}: {e}")
             return []
     
     @staticmethod
-    def parse_xml_string(xml_content):
+    def parse_xml_string(xml_content, network_id="unknown"):
         """
         Parse XML string into Host objects.
         
@@ -52,7 +52,7 @@ class NmapXmlParser:
                 host_list = [host_list] if host_list else []
             
             for host_data in host_list:
-                host = NmapXmlParser._parse_host_data(host_data)
+                host = NmapXmlParser._parse_host_data(host_data, network_id)
                 if host:
                     hosts.append(host)
             
@@ -63,7 +63,7 @@ class NmapXmlParser:
             return []
     
     @staticmethod
-    def _parse_host_data(host_data):
+    def _parse_host_data(host_data, network_id="unknown"):
         """
         Parse individual host data from XML.
         
@@ -114,7 +114,7 @@ class NmapXmlParser:
                     os_info = osmatch[0].get('@name', '')
             
             # Create host
-            host = Host(ip=ip, hostname=hostname, os=os_info)
+            host = Host(ip=ip, hostname=hostname, os=os_info, network_id=network_id)
             
             # Parse services/ports
             ports_data = host_data.get('ports', {})
@@ -127,6 +127,8 @@ class NmapXmlParser:
                     service = NmapXmlParser._parse_port_data(port_data)
                     if service:
                         host.add_service(service)
+                if port_list and not host.services:
+                    return None
             
             return host
             

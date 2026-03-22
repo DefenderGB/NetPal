@@ -3,6 +3,14 @@ Display and UI utilities for NetPal
 """
 from colorama import Fore, Style
 
+INDENT = "  "
+INDENT2 = "    "
+COLOR_SUCCESS = Fore.GREEN
+COLOR_DIM = Fore.LIGHTBLACK_EX
+COLOR_EMPHASIS = Fore.CYAN
+COLOR_WARNING = Fore.YELLOW
+COLOR_ERROR = Fore.RED
+
 
 def print_banner():
     """Display NetPal banner."""
@@ -11,6 +19,30 @@ def print_banner():
         f"  {Fore.WHITE}— Network Penetration Testing CLI{Style.RESET_ALL}\n"
     )
     print(banner)
+
+
+def print_section_banner(title: str, subtitle: str = ""):
+    """Print a simple section banner."""
+    line = f"\n{Fore.CYAN}  ▸ {title}{Style.RESET_ALL}"
+    if subtitle:
+        line += f" {Fore.WHITE}— {subtitle}{Style.RESET_ALL}"
+    print(f"{line}\n")
+
+
+def print_success(message: str):
+    print(f"{Fore.GREEN}[SUCCESS] {message}{Style.RESET_ALL}")
+
+
+def print_error(message: str):
+    print(f"{Fore.RED}[ERROR] {message}{Style.RESET_ALL}")
+
+
+def print_info(message: str):
+    print(f"{Fore.CYAN}[INFO] {message}{Style.RESET_ALL}")
+
+
+def print_warning(message: str):
+    print(f"{Fore.YELLOW}[WARNING] {message}{Style.RESET_ALL}")
 
 
 def print_tool_status(tool_name, is_required, is_installed):
@@ -162,15 +194,23 @@ def display_hosts_detail(hosts):
 
     width = 72
 
-    for host in sorted(hosts, key=lambda h: h.ip):
+    duplicate_ips = {host.ip for host in hosts if sum(1 for h in hosts if h.ip == host.ip) > 1}
+
+    for host in sorted(hosts, key=lambda h: (h.ip, getattr(h, "network_id", "unknown"))):
         hostname_part = f"  {Fore.LIGHTBLACK_EX}({host.hostname}){Style.RESET_ALL}" if host.hostname else ""
         os_part = f"  {Fore.LIGHTBLACK_EX}OS: {host.os}{Style.RESET_ALL}" if host.os else ""
+        network_part = ""
+        if host.ip in duplicate_ips:
+            network_part = (
+                f"  {Fore.LIGHTBLACK_EX}network: "
+                f"{getattr(host, 'network_id', 'unknown')}{Style.RESET_ALL}"
+            )
 
         print(f"{Fore.CYAN}╭{'─' * width}╮{Style.RESET_ALL}")
         print(
             f"{Fore.CYAN}│{Style.RESET_ALL}  "
             f"{Fore.WHITE}{host.ip}{Style.RESET_ALL}"
-            f"{hostname_part}{os_part}"
+            f"{hostname_part}{os_part}{network_part}"
         )
         finding_count = len(host.findings)
         if finding_count:

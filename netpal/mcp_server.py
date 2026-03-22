@@ -94,6 +94,8 @@ from .mcp_tools.scan_tools import register_scan_tools
 from .mcp_tools.ai_tools import register_ai_tools
 from .mcp_tools.finding_tools import register_finding_tools
 from .mcp_tools.config_tools import register_config_tools
+from .mcp_tools.ad_tools import register_ad_tools
+from .mcp_tools.testcase_tools import register_testcase_tools
 
 register_project_tools(mcp)
 register_asset_tools(mcp)
@@ -101,6 +103,8 @@ register_scan_tools(mcp)
 register_ai_tools(mcp)
 register_finding_tools(mcp)
 register_config_tools(mcp)
+register_ad_tools(mcp)
+register_testcase_tools(mcp)
 
 
 # ── Register Resources ─────────────────────────────────────────────────────

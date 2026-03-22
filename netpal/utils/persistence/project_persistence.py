@@ -18,6 +18,54 @@ def save_findings_to_file(project):
     save_json(findings_path, findings_data, compact=True)
 
 
+def load_active_project(config: dict | None = None):
+    """Load the active project and populate findings."""
+    from ..config_loader import ConfigLoader
+    from ...models.project import Project
+    from ...models.finding import Finding
+    from .file_utils import load_json, get_findings_path
+
+    active_config = config or ConfigLoader.load_config_json() or {}
+    project_name = active_config.get("project_name", "")
+    if not project_name:
+        return None
+
+    project = Project.load_from_file(project_name)
+    if not project:
+        return None
+
+    findings_path = get_findings_path(project.project_id)
+    findings_data = load_json(findings_path, default=[])
+    project.findings = [Finding.from_dict(f) for f in findings_data]
+    return project
+
+
+def delete_finding_from_project(project, finding_id: str) -> bool:
+    """Delete a finding and remove reverse references from hosts."""
+    if not project or not finding_id:
+        return False
+
+    target = None
+    remaining = []
+    for finding in project.findings:
+        if finding.finding_id == finding_id and target is None:
+            target = finding
+            continue
+        remaining.append(finding)
+
+    if target is None:
+        return False
+
+    project.findings = remaining
+    for host in project.hosts:
+        if finding_id in host.findings:
+            host.findings = [fid for fid in host.findings if fid != finding_id]
+
+    save_findings_to_file(project)
+    save_project_to_file(project)
+    return True
+
+
 class ProjectPersistence:
     """Handles local project and findings persistence."""
     

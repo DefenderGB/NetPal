@@ -57,7 +57,7 @@ def register_scan_tools(mcp):
           - After each scan, use the list_hosts tool to see updated results.
 
         Args:
-            scan_type: Scan type — one of 'nmap-discovery', 'top100', 'top1000',
+            scan_type: Scan type — one of 'nmap-discovery', 'discover', 'top100', 'top1000',
                        'http', 'netsec', 'allports', 'custom'.
             asset: Asset name to scan (or filter discovered hosts by).
             host: Single IP/hostname to scan.
@@ -74,9 +74,12 @@ def register_scan_tools(mcp):
         """
         from ..mcp_server import get_netpal_ctx
         from ..services.nmap.scanner import NmapScanner
+        from ..utils.config_loader import ConfigLoader
+        from ..utils.network_context import detect_network_context
         from ..utils.scanning.recon_executor import execute_recon_with_tools
         from ..utils.scanning.scan_helpers import run_discovery_phase
         from ..utils.persistence.project_persistence import save_project_to_file
+        from ..utils.tool_paths import check_playwright_installed
 
         nctx = get_netpal_ctx(ctx)
 
@@ -84,12 +87,17 @@ def register_scan_tools(mcp):
             raise RuntimeError("Passwordless sudo for nmap is not configured.")
         if not nctx.nmap_available:
             raise RuntimeError("nmap is not installed or not found in PATH.")
+        if not check_playwright_installed():
+            raise RuntimeError(
+                "Playwright is not installed or its Chromium runtime cannot launch. "
+                "Run `uv run playwright install chromium` or rerun `bash install.sh`."
+            )
 
         project = nctx.get_project()
         if not project:
             raise ValueError("No active project. Create or switch to a project first.")
 
-        valid_types = ("nmap-discovery", "top100", "top1000", "http", "netsec", "allports", "custom")
+        valid_types = ("nmap-discovery", "discover", "top100", "top1000", "http", "netsec", "allports", "custom")
         if scan_type not in valid_types:
             raise ValueError(f"scan_type must be one of: {', '.join(valid_types)}")
 
@@ -120,12 +128,12 @@ def register_scan_tools(mcp):
                 raise ValueError(f"Asset '{asset}' not found in project")
 
         if has_discovered and has_asset:
-            host_ips = [h.ip for h in project.hosts if asset_obj.asset_id in h.assets]
+            host_ips = [h.scan_target for h in project.hosts if asset_obj.asset_id in h.assets]
             if not host_ips:
                 raise ValueError(f"No discovered hosts found for asset '{asset}'")
             target_mode = "discovered_asset"
         elif has_discovered:
-            host_ips = [h.ip for h in project.hosts]
+            host_ips = [h.scan_target for h in project.hosts]
             if not host_ips:
                 raise ValueError("No discovered hosts found in project")
             if not asset_obj and project.assets:
@@ -149,9 +157,12 @@ def register_scan_tools(mcp):
 
         scanner = NmapScanner(config=nctx.config)
         shim = _build_shim(nctx, project, scanner)
+        iface = interface or nctx.config.get("network_interface", "")
+        network_context = detect_network_context(iface)
+        network_id = network_context.network_id
 
         # Handle discovery scan
-        if scan_type == "nmap-discovery":
+        if ConfigLoader.is_discovery_scan(scan_type):
             if target_mode != "asset":
                 raise ValueError("Discovery scan requires an asset (not discovered/host mode)")
 
@@ -159,6 +170,8 @@ def register_scan_tools(mcp):
                 scanner, asset_obj, project, nctx.config, speed,
                 output_callback=lambda line: None,
                 verbose=False,
+                scan_type=scan_type,
+                network_id=network_id,
             )
 
             if hosts:
@@ -170,7 +183,7 @@ def register_scan_tools(mcp):
             host_ips_list = [h.ip for h in hosts] if hosts else []
 
             result = {
-                "scan_type": "nmap-discovery",
+                "scan_type": scan_type,
                 "project_name": project.name,
                 "asset": asset_obj.name if asset_obj else None,
                 "hosts_discovered": host_count,
@@ -194,7 +207,6 @@ def register_scan_tools(mcp):
             return result
 
         # Recon scan
-        iface = interface or nctx.config.get("network_interface", "")
         force_skip = skip_discovery or target_mode in ("discovered", "discovered_asset", "host")
 
         if target_mode in ("discovered", "discovered_asset"):
@@ -258,8 +270,17 @@ def register_scan_tools(mcp):
             save_project_to_file, save_findings_to_file,
         )
         from ..services.tools.tool_orchestrator import ToolOrchestrator as ToolRunner
+        from ..utils.tool_paths import check_playwright_installed
 
         nctx = get_netpal_ctx(ctx)
+        if not nctx.nmap_available:
+            raise RuntimeError("nmap is not installed or not found in PATH.")
+        if not check_playwright_installed():
+            raise RuntimeError(
+                "Playwright is not installed or its Chromium runtime cannot launch. "
+                "Run `uv run playwright install chromium` or rerun `bash install.sh`."
+            )
+
         project = nctx.get_project()
         if not project:
             raise ValueError("No active project.")
@@ -356,7 +377,7 @@ def register_scan_tools(mcp):
             }
 
         hosts_data = []
-        for host in sorted(project.hosts, key=lambda h: h.ip):
+        for host in sorted(project.hosts, key=lambda h: (h.ip, getattr(h, "network_id", "unknown"))):
             services = []
             for svc in sorted(host.services, key=lambda s: s.port):
                 svc_info = {
@@ -375,6 +396,7 @@ def register_scan_tools(mcp):
                 "ip": host.ip,
                 "hostname": host.hostname or "",
                 "os": host.os or "",
+                "network_id": getattr(host, "network_id", "unknown"),
                 "services": services,
                 "open_ports": [s.port for s in host.services],
                 "finding_count": len(host.findings),

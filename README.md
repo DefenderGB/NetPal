@@ -14,7 +14,7 @@ NetPal is a CLI network pentest automation tool and AI copilot for network penet
 - Python 3.12
 - [**uv**](https://docs.astral.sh/uv/) — Python package manager (installed automatically by `install.sh`)
 - **nmap** — network discovery and port scanning (sudo required for SYN scans)
-- **playwright** — headless Chromium browser for HTTP response capture and screenshots (installed as a Python dependency)
+- **playwright** — headless Chromium browser for HTTP response capture and screenshots (the installer also downloads Chromium)
 - **nuclei** — vulnerability scanning with templates
 
 ## Installation
@@ -26,6 +26,7 @@ curl -sSL https://raw.githubusercontent.com/DefenderGB/NetPal/refs/heads/main/in
 ```
 
 This clones the repo into `~/tools/NetPal`, installs all dependencies, and sets up the environment.
+If `.venv` already exists, the installer now refreshes dependencies and re-runs the Playwright Chromium install step.
 
 ### Manual Install
 
@@ -51,17 +52,17 @@ Running `netpal` with no arguments shows the project dashboard and suggests the 
 
 Each subcommand has its own `--help` — run `netpal <command> --help` for detailed options and examples.
 
-An alternative interactive terminal UI is also available via `netpal interactive` (requires the `textual` package).
+An alternative interactive terminal UI is also available via `netpal interactive` (requires the `textual` package, `nmap`, and a working Playwright Chromium install).
 
-The TUI can also be served as a web application in the browser via `netpal website` (uses `textual-serve` on port 7123).
+The TUI can also be served as a web application in the browser via `netpal website` (uses `textual-serve` on port 7123 and performs the same `nmap`/Playwright startup check).
 
 ```text
-usage: netpal [-h] [-p PROJECT] [-v] [-c CONFIG] {init,list,set,project-edit,assets,recon,recon-tools,ai-review,ai-report-enhance,setup,findings,hosts,export,delete,interactive,website,auto} ...
+usage: netpal [-h] [-p PROJECT] [-v] [-c CONFIG] {init,list,set,project-edit,assets,recon,recon-tools,ai-review,ai-report-enhance,setup,findings,hosts,export,delete,interactive,website,auto,ad-scan,testcase} ...
 
 NetPal — Automated Network Penetration Testing CLI Tool
 
 positional arguments:
-  {init,list,set,project-edit,assets,recon,recon-tools,ai-review,ai-report-enhance,setup,findings,hosts,export,delete,interactive,website,auto}
+  {init,list,set,project-edit,assets,recon,recon-tools,ai-review,ai-report-enhance,setup,findings,hosts,export,delete,interactive,website,auto,ad-scan,testcase}
                         Available commands
     init                Create a new project and set it as active
     list                List all local projects
@@ -80,6 +81,8 @@ positional arguments:
     interactive         Launch the Textual-based interactive TUI
     website             Serve the Textual TUI as a web application
     auto                Fully automated scan pipeline (project → asset → discovery → recon → hosts)
+    ad-scan             Run Active Directory LDAP scan (BloodHound output)
+    testcase            Manage test case checklists for the active project
 
 options:
   -h, --help            show this help message and exit
@@ -121,18 +124,19 @@ netpal auto --range "10.0.0.0/24" --file extra_hosts.txt --interface "eth0"
 # 1. Configure NetPal (first run)
 netpal setup
 
-# 2.a (Faster) Use interactive UI to create project, create asset, run recon, generate AI findings, and Enhance findings
+# 2.a (Faster) Use interactive UI to create project, set AD metadata, optionally seed an asset, run recon, generate AI findings, and Enhance findings
 netpal interactive        # Terminal TUI
 netpal website            # Web UI on http://localhost:7123
 
 # 2.b Create a project
-netpal init --name "My Pentest"
+netpal init "My Pentest"
 
 # 3. Create a scan target
 netpal assets network --name DMZ --range "10.0.0.0/24"
 
 # 4. Discover hosts
 netpal recon --asset DMZ --type nmap-discovery
+netpal recon --asset DMZ --type discover
 
 # 5. Scan services (by asset, discovered hosts, or single host)
 netpal recon --discovered --type top100 # Recon against every discovered host
@@ -155,6 +159,15 @@ netpal ai-report-enhance
 # 8. View results
 netpal findings
 netpal hosts
+
+# 9. Optional: run a local AD scan
+netpal project-edit
+netpal ad-scan --username 'CORP\\tester' --password 'P@ssw0rd'
+
+# 10. Optional: track testcase status locally
+netpal testcase --load --csv-path ./testcases.csv
+netpal testcase --set-result enumeration--check-anonymous-access passed --notes "Validated manually"
+netpal testcase --results
 ```
 
 ### Managing Local Projects
@@ -166,7 +179,7 @@ netpal list
 # Switch active project
 netpal set "My Pentest"
 
-# Update the active project's name or external tracking ID
+# Update the active project's name, description, external tracking ID, or AD metadata
 netpal project-edit
 
 # View hosts/findings
@@ -182,6 +195,7 @@ netpal export "My Pentest"
 | Type | Description |
 |---|---|
 | `nmap-discovery` | Ping sweep to find live hosts |
+| `discover` | Combined ping sweep plus common-port host discovery |
 | `top100` | 100 most common ports |
 | `top1000` | 1000 most common ports |
 | `http` | Web service ports only |
@@ -195,9 +209,40 @@ NetPal supports AWS Bedrock, Anthropic, OpenAI, Ollama, Azure OpenAI, and Google
 
 For AWS Bedrock, use `ai_type: "aws"` plus the Bedrock settings such as `ai_aws_profile`, `ai_aws_region`, and `ai_aws_model`.
 
+## Local-Only Feature Surface
+
+This repo is intentionally local-only.
+
+- Included: local project storage, recon, exploit-tool evidence, AI review/enhancement, manual findings, AD LDAP collection, testcase tracking, TUI/web UI, MCP, and local export.
+- Excluded: `upload`, `pull`, `push`, cloud sync, S3-backed storage, and internal-only/Midway workflows.
+
 ## Local Storage
 
 NetPal now stores projects, findings, and evidence locally under `scan_results/`. On startup it also removes legacy cloud-sync metadata from existing `config.json`, `scan_results/projects.json`, and local project JSON files.
+
+Additional local data paths:
+
+- Project descriptions live in `metadata.description`.
+- Testcase registries live in `scan_results/<project_id>_testcases.json`.
+- AD outputs live in `scan_results/<project_id>/ad_scan/`.
+
+## Active Directory Scanning
+
+Use `netpal ad-scan` to run local LDAP collection and produce BloodHound-compatible JSON for the active project.
+
+- Set `ad_domain` and `ad_dc_ip` first with `netpal project-edit` or the TUI project editor.
+- Dependencies include `ldap3` and `pycryptodome`.
+- Custom LDAP query output is written under `scan_results/<project_id>/ad_scan/ad_queries/`.
+
+## Test Case Tracking
+
+Use `netpal testcase` for local checklist management.
+
+- `--load --csv-path` imports test cases from CSV.
+- `--set-result ... --notes ...` updates local status and notes.
+- `--results` shows grouped status, optionally filtered by `--phase` or `--status`.
+
+CSV is the only testcase import mode in this repo. There is no config-backed testsuite catalog.
 
 ## Results Structure
 
@@ -227,8 +272,10 @@ export PATH=$PATH:~/go/bin
 # AI not working — verify provider config
 netpal setup
 
-# Playwright errors — install Chromium browser for Playwright
-playwright install chromium
+# Playwright errors — reinstall the bundled Playwright browser runtime
+uv run playwright install chromium
+# Or rerun the full installer, which now verifies Playwright can launch
+bash install.sh
 
 # Passwordless sudo for nmap — install.sh offers to configure this automatically.
 # To set up manually:

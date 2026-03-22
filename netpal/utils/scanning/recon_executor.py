@@ -19,7 +19,8 @@ from ...services.tools.tool_orchestrator import ToolOrchestrator
 
 def execute_recon_with_tools(netpal_instance, asset, target, interface, scan_type, custom_ports,
                               speed=None, skip_discovery=True, verbose=False,
-                              rerun_autotools="2", host_ips=None, resume_chunk=None):
+                              rerun_autotools="2", host_ips=None, resume_chunk=None,
+                              network_context=None):
     """
     Execute reconnaissance scans with automatic exploit tool execution.
     
@@ -51,8 +52,15 @@ def execute_recon_with_tools(netpal_instance, asset, target, interface, scan_typ
     """
     start_time = time.time()
     scan_success = False
+    from ..network_context import detect_network_context
+
+    iface = interface or netpal_instance.config.get('network_interface', '')
+    if network_context is None:
+        network_context = detect_network_context(iface)
+    network_id = network_context.network_id
     
     print(f"\n{Fore.CYAN}Starting scans...{Style.RESET_ALL}\n")
+    print(f"{Fore.CYAN}Network context: {network_context.label}{Style.RESET_ALL}\n")
     
     exclude = netpal_instance.config.get('exclude')
     exclude_ports = netpal_instance.config.get('exclude-ports')
@@ -82,7 +90,7 @@ def execute_recon_with_tools(netpal_instance, asset, target, interface, scan_typ
     if target == "__ALL_HOSTS__" and all_host_ips is None:
         # Resolve IPs from project (fallback when caller didn't provide them)
         all_host_ips = [
-            h.ip for h in netpal_instance.project.hosts
+            h.scan_target for h in netpal_instance.project.hosts
             if asset.asset_id in h.assets
         ]
 
@@ -97,6 +105,7 @@ def execute_recon_with_tools(netpal_instance, asset, target, interface, scan_typ
             exploit_tools, output_callback, _save_project, _save_findings,
             rerun_autotools=rerun_autotools, custom_ports=custom_ports,
             resume_chunk=resume_chunk, config=netpal_instance.config,
+            network_id=network_id,
         )
         scan_success = bool(found_hosts)
     else:
@@ -105,6 +114,7 @@ def execute_recon_with_tools(netpal_instance, asset, target, interface, scan_typ
             netpal_instance.scanner, asset, netpal_instance.project, target,
             interface, scan_type, custom_ports, speed, skip_discovery, verbose,
             exclude, exclude_ports, output_callback,
+            network_id=network_id,
         )
 
         if error:

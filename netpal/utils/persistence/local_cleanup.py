@@ -5,6 +5,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from .project_paths import get_base_scan_results_dir
+
 
 LEGACY_CONFIG_KEYS = {
     "aws_sync_account",
@@ -53,7 +55,7 @@ def cleanup_legacy_local_storage(
             if cleaned_config != config_data:
                 _save_json(config_path, cleaned_config)
 
-    base_dir = scan_results_dir or (Path.cwd() / "scan_results")
+    base_dir = scan_results_dir or Path(get_base_scan_results_dir())
     if not base_dir.exists():
         return
 

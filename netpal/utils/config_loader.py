@@ -4,7 +4,7 @@ Configuration loader for JSON files
 import os
 import json
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from colorama import Fore, Style
 
 
@@ -131,6 +131,53 @@ class ConfigLoader:
             print(f"Error loading exploit_tools.json: {e}")
         
         return []
+
+    @staticmethod
+    def load_recon_types():
+        """
+        Load recon_types.json configuration.
+
+        Returns:
+            List of recon type definitions.
+        """
+        recon_path = ConfigLoader.get_config_path("recon_types.json")
+
+        try:
+            if os.path.exists(recon_path):
+                with open(recon_path, "r") as f:
+                    data = json.load(f)
+                    return data if isinstance(data, list) else []
+        except Exception as e:
+            print(f"Error loading recon_types.json: {e}")
+
+        return []
+
+    @staticmethod
+    def get_recon_type(scan_type_id: str):
+        """
+        Look up a recon type by ID.
+        """
+        for recon_type in ConfigLoader.load_recon_types():
+            if recon_type.get("id") == scan_type_id:
+                return recon_type
+        return None
+
+    @staticmethod
+    def get_recon_type_ids() -> List[str]:
+        """
+        Return all configured recon type IDs.
+        """
+        return [rt.get("id", "") for rt in ConfigLoader.load_recon_types() if rt.get("id")]
+
+    @staticmethod
+    def is_discovery_scan(scan_type_id: str) -> bool:
+        """
+        Return True when a scan type is a discovery scan.
+        """
+        recon_type = ConfigLoader.get_recon_type(scan_type_id)
+        if recon_type is not None:
+            return bool(recon_type.get("is_discovery"))
+        return bool(scan_type_id and scan_type_id.endswith("discovery"))
     
     @staticmethod
     def load_ai_prompts():
@@ -155,7 +202,7 @@ class ConfigLoader:
             "impact_prompt": "",
             "remediation_prompt": ""
         }
-    
+
     @staticmethod
     def update_config_project_name(new_project_name):
         """

@@ -37,6 +37,11 @@ def register_project_resources(mcp):
         return {
             "active_project": project_name,
             "project_id": project.project_id,
+            "description": project.description,
+            "external_id": project.external_id,
+            "ad_domain": project.ad_domain,
+            "ad_dc_ip": project.ad_dc_ip,
+            "metadata": project.metadata,
             "assets": len(project.assets),
             "hosts": len(project.hosts),
             "services": services_count,
@@ -68,6 +73,9 @@ def register_project_resources(mcp):
                 "name": proj.get("name", "Unknown"),
                 "id": pid,
                 "external_id": proj.get("external_id", ""),
+                "ad_domain": proj.get("ad_domain", ""),
+                "ad_dc_ip": proj.get("ad_dc_ip", ""),
+                "metadata": proj.get("metadata", {}),
                 "is_active": proj.get("name", "") == active_name,
             }
 
@@ -80,6 +88,7 @@ def register_project_resources(mcp):
                     hosts_list = data.get("hosts", [])
                     entry["hosts"] = len(hosts_list)
                     entry["services"] = sum(len(h.get("services", [])) for h in hosts_list)
+                    entry["description"] = (data.get("metadata", {}) or {}).get("description", "")
 
                     findings_path = get_findings_path(pid)
                     findings_data = load_json(findings_path, default=[])

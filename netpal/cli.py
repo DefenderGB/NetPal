@@ -37,6 +37,7 @@ Workflow:
 RECON_EXAMPLES = """\
 Examples:
   netpal recon --asset DMZ --type nmap-discovery
+  netpal recon --asset DMZ --type discover
   netpal recon --asset DMZ --type top100 --speed 4
   netpal recon --asset DMZ --type allports
   netpal recon --asset DMZ --type custom --nmap-options "-p 8080,9090 -sV"
@@ -89,7 +90,8 @@ PROJECT_EDIT_EXAMPLES = """\
 Examples:
   netpal project-edit
 
-Interactively edit the active project's name and external ID.
+Interactively edit the active project's name, description, external ID,
+AD domain, and domain controller IP.
 """
 
 RECON_TOOLS_EXAMPLES = """\
@@ -101,6 +103,7 @@ Examples:
   netpal recon-tools -t all_discovered --project "Other Project"
   netpal recon-tools -t all_discovered --http-recon  # only run Playwright on HTTP/HTTPS services
   netpal recon-tools --host 10.0.0.5 --port 80 --tool 'FTP Anonymous Login'
+  netpal recon-tools --host 10.0.0.5 --network-id gwmac:aa:bb:cc:dd:ee:ff --port 80 --tool 'FTP Anonymous Login'
   netpal recon-tools --host 10.0.0.253 --port 80 --tool 'Unauthenticated Bosch R2 Dashboard Access'
 
 Lists targets with host and service counts, or runs exploit tools
@@ -125,6 +128,14 @@ Runs a fully automated pipeline:
   4. Runs top-1000 port scan on discovered hosts
   5. Runs netsec known-ports scan
   6. Displays discovered hosts and services
+"""
+
+AD_SCAN_EXAMPLES = """\
+Examples:
+  netpal ad-scan --username 'CORP\\admin' --password 'P@ssw0rd'
+  netpal ad-scan --domain CORP.LOCAL --dc-ip 10.0.0.1 --auth-type anonymous
+  netpal ad-scan --username 'CORP\\admin' --password 'P@ss' --output-types users,groups
+  netpal ad-scan --filter '(sAMAccountName=admin)' --username 'CORP\\admin' --password 'P@ss'
 """
 
 
@@ -154,12 +165,12 @@ class NetPal:
         self.running = False
         sys.exit(0)
     
-    def run_discovery(self, asset, speed=None, verbose=False):
+    def run_discovery(self, asset, speed=None, verbose=False, scan_type="nmap-discovery"):
         """Run discovery phase (ping scan)."""
         # Execute discovery scan
         hosts = run_discovery_phase(
             self.scanner, asset, self.project, self.config, speed, self._output_callback,
-            verbose=verbose
+            verbose=verbose, scan_type=scan_type,
         )
         
         if hosts:
@@ -233,7 +244,7 @@ def create_argument_parser():
         'project-edit',
         parents=[_verbose_parent],
         help='Interactively edit the active project',
-        description='Edit the active project name and external ID.',
+        description='Edit the active project name, description, external ID, AD domain, and domain controller IP.',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=PROJECT_EDIT_EXAMPLES,
     )
@@ -276,7 +287,7 @@ def create_argument_parser():
                               help='Scan previously discovered hosts (optionally with --asset)')
     recon_parser.add_argument('-H','--host', help='Scan a single IP or hostname')
     recon_parser.add_argument('-t','--type', dest='scan_type', required=True,
-                              choices=['nmap-discovery', 'top100', 'top1000',
+                              choices=['nmap-discovery', 'discover', 'top100', 'top1000',
                                        'http', 'netsec', 'allports', 'custom'],
                               help='Scan type')
     recon_parser.add_argument('-s','--speed', type=int, choices=[1, 2, 3, 4, 5], default=3,
@@ -313,6 +324,8 @@ def create_argument_parser():
                                     help='List all available exploit tools from exploit_tools.json')
     recon_tools_parser.add_argument('-H','--host', default=None,
                                     help='Run tools against a specific host IP')
+    recon_tools_parser.add_argument('--network-id', default=None,
+                                    help='Network ID for --host when multiple discovered hosts share the same IP')
     recon_tools_parser.add_argument('-P','--port', type=int, default=None,
                                     help='Run tools against a specific port on the host')
     recon_tools_parser.add_argument('--tool', default=None,
@@ -372,6 +385,8 @@ def create_argument_parser():
     findings_parser.add_argument('-f','--format', choices=['table', 'json'], default='table',
                                  help='Output format')
     findings_parser.add_argument('-d','--delete', help='Delete finding by ID')
+    findings_parser.add_argument('--create', action='store_true',
+                                 help='Launch interactive finding creation wizard')
 
 
     # ── hosts ─────────────────────────────────────────────────────────
@@ -459,6 +474,76 @@ findings JSON, and all evidence files from scan_results/.
                                   'or number of days (e.g. 2, 7) — re-run if last '
                                   'execution was more than N days ago (default: 2)')
 
+    # ── ad-scan ──────────────────────────────────────────────────────
+    ad_parser = subparsers.add_parser(
+        'ad-scan',
+        parents=[_verbose_parent],
+        help='Run Active Directory LDAP scan (BloodHound output)',
+        description='Enumerate AD objects via LDAP and produce BloodHound v6 JSON files.',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=AD_SCAN_EXAMPLES,
+    )
+    ad_parser.add_argument('--domain', default='',
+                           help='AD domain (e.g. CORP.LOCAL). Falls back to project setting.')
+    ad_parser.add_argument('--dc-ip', default='',
+                           help='Domain Controller IP or hostname. Falls back to project setting.')
+    ad_parser.add_argument('--username', default='',
+                           help='Auth username (DOMAIN\\user or user@domain)')
+    ad_parser.add_argument('--password', default='',
+                           help='Auth password for NTLM bind')
+    ad_parser.add_argument('--hashes', default='',
+                           help='NTLM hashes for pass-the-hash (LM:NT or :NT format)')
+    ad_parser.add_argument('--aes-key', default='',
+                           help='AES key for Kerberos auth')
+    ad_parser.add_argument('--ldaps', '--use-ssl', action='store_true', dest='use_ssl',
+                           help='Use LDAPS (port 636) instead of LDAP (389)')
+    ad_parser.add_argument('-k', '--kerberos', action='store_true',
+                           help='Use Kerberos auth from ccache')
+    ad_parser.add_argument('--no-smb', action='store_true',
+                           help='Skip SMB connection for Kerberos hostname resolution')
+    ad_parser.add_argument('--channel-binding', action='store_true',
+                           help='Enable LDAPS channel binding')
+    ad_parser.add_argument('--auth-type', choices=['anonymous', 'ntlm', 'kerberos'],
+                           default='ntlm', help='Authentication method (default: ntlm)')
+    ad_parser.add_argument('--output-types', default='all',
+                           help='Comma-separated types or "all" (users,computers,groups,domains,ous,gpos,containers)')
+    ad_parser.add_argument('--throttle', type=float, default=0.0,
+                           help='Seconds between LDAP page requests (default: 0)')
+    ad_parser.add_argument('--page-size', type=int, default=500,
+                           help='Results per LDAP page (default: 500)')
+    ad_parser.add_argument('--base-dn', default='',
+                           help='Custom search base DN')
+    ad_parser.add_argument('--limit', type=int, default=0,
+                           help='Max entries to collect per object type (0 = unlimited)')
+    ad_parser.add_argument('--no-sd', action='store_true',
+                           help='Skip nTSecurityDescriptor queries')
+    ad_parser.add_argument('--filter', default=None,
+                           help='Custom LDAP filter for ad-hoc queries')
+    ad_parser.add_argument('--scope', choices=['BASE', 'LEVEL', 'SUBTREE'],
+                           default='SUBTREE', help='LDAP search scope (default: SUBTREE)')
+
+    # ── testcase ─────────────────────────────────────────────────────
+    tc_parser = subparsers.add_parser(
+        'testcase',
+        parents=[_verbose_parent],
+        help='Manage test case checklists for the active project',
+        description='Load test cases from CSV, update status, and view results.',
+    )
+    tc_parser.add_argument('--load', action='store_true',
+                           help='Load test cases from CSV')
+    tc_parser.add_argument('--csv-path', dest='csv_path', default='',
+                           help='Path to CSV file for testcase loading')
+    tc_parser.add_argument('--set-result', nargs=2, metavar=('TEST_CASE_ID', 'STATUS'),
+                           help='Set test case status (passed/failed/needs_input)')
+    tc_parser.add_argument('--notes', default='',
+                           help='Notes for --set-result')
+    tc_parser.add_argument('--results', action='store_true',
+                           help='View test case results')
+    tc_parser.add_argument('--phase', default='',
+                           help='Filter results by phase')
+    tc_parser.add_argument('--status', default='',
+                           help='Filter results by status')
+
     return parser
 
 
@@ -524,6 +609,14 @@ def display_dashboard(config, project):
     print(f"  Active Project : {project_name}")
     if project:
         print(f"  Project ID     : {project.project_id}")
+        if project.description:
+            print(f"  Description    : {project.description}")
+        if project.external_id:
+            print(f"  External ID    : {project.external_id}")
+        if project.ad_domain:
+            print(f"  AD Domain      : {project.ad_domain}")
+        if project.ad_dc_ip:
+            print(f"  DC IP          : {project.ad_dc_ip}")
         print(f"  Assets         : {len(project.assets)}")
         print(f"  Hosts          : {len(project.hosts)}")
         services_count = sum(len(h.services) for h in project.hosts)
@@ -547,6 +640,8 @@ def display_dashboard(config, project):
     print(f"    netpal setup             Configuration wizard")
     print(f"    netpal auto              Fully automated scan pipeline")
     print(f"    netpal recon-tools       List targets or run exploit tools")
+    print(f"    netpal ad-scan           Run AD LDAP scan")
+    print(f"    netpal testcase          Manage testcase checklists")
     print(f"    netpal export            Export project scan results as zip")
     
     # Contextual next-step suggestion
@@ -610,6 +705,11 @@ def main():
 
     # Handle website (serve TUI in browser)
     if args.command == 'website':
+        from .utils.tool_paths import check_tools
+
+        if not check_tools():
+            return 1
+
         from textual_serve.server import Server
         from .utils.validation import get_interfaces_with_ips
 
@@ -694,6 +794,8 @@ def main():
     from .modes.ai_enhance_handler import AIEnhanceHandler
     from .modes.findings_cli_handler import FindingsCLIHandler
     from .modes.hosts_handler import HostsHandler
+    from .modes.ad_scan_handler import ADScanHandler
+    from .modes.testcase_handler import TestcaseHandler
     
     # Route to handler
     handlers = {
@@ -704,6 +806,8 @@ def main():
         'ai-report-enhance': lambda: AIEnhanceHandler(cli, args),
         'findings': lambda: FindingsCLIHandler(cli, args),
         'hosts': lambda: HostsHandler(cli, args),
+        'ad-scan': lambda: ADScanHandler(cli, args),
+        'testcase': lambda: TestcaseHandler(cli, args),
     }
     
     handler_factory = handlers.get(args.command)

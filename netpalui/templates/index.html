@@ -116,6 +116,12 @@
             {% if p.external_id %}
             <div class="project-ext text-muted">Ext: {{ p.external_id }}</div>
             {% endif %}
+            {% if p.description %}
+            <div class="project-ext text-muted">{{ p.description }}</div>
+            {% endif %}
+            {% if p.ad_domain %}
+            <div class="project-ext text-muted">AD: {{ p.ad_domain }}{% if p.ad_dc_ip %} · DC: {{ p.ad_dc_ip }}{% endif %}</div>
+            {% endif %}
             <div class="project-meta">
                 <span>{{ p.updated_str }}</span>
             </div>

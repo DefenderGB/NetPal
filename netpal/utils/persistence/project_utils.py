@@ -199,6 +199,9 @@ def create_project_headless(
     config: dict,
     description: str = "",
     external_id: str = "",
+    ad_domain: str = "",
+    ad_dc_ip: str = "",
+    metadata: dict | None = None,
 ):
     """Create a project, save it, register it, and update config.
 
@@ -208,9 +211,12 @@ def create_project_headless(
     Args:
         name: Project name (must be non-empty and unique).
         config: Current configuration dictionary.
-        description: Optional project description (stored for reference only).
+        description: Optional project description.
         external_id: Optional external tracking ID.  Falls back to
             ``config["external_id"]`` when empty.
+        ad_domain: Optional Active Directory domain.
+        ad_dc_ip: Optional Domain Controller IP or hostname.
+        metadata: Optional project metadata dictionary.
 
     Returns:
         The created ``Project`` instance.
@@ -241,10 +247,18 @@ def create_project_headless(
     if not external_id:
         external_id = (config or {}).get("external_id", "")
 
+    project_metadata = dict(metadata or {})
+    if description:
+        project_metadata["description"] = description
+
     # Create the project object
-    project = Project(name=name)
-    if external_id:
-        project.external_id = external_id
+    project = Project(
+        name=name,
+        external_id=external_id,
+        ad_domain=ad_domain,
+        ad_dc_ip=ad_dc_ip,
+        metadata=project_metadata,
+    )
 
     save_project_to_file(project)
     ConfigLoader.update_config_project_name(name)

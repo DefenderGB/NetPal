@@ -16,9 +16,7 @@ def register_finding_tools(mcp):
             Dict confirming deletion.
         """
         from ..mcp_server import get_netpal_ctx
-        from ..utils.persistence.project_persistence import (
-            save_findings_to_file, save_project_to_file,
-        )
+        from ..utils.persistence.project_persistence import delete_finding_from_project
 
         nctx = get_netpal_ctx(ctx)
         project = nctx.get_project()
@@ -28,12 +26,7 @@ def register_finding_tools(mcp):
         if not finding_id or not finding_id.strip():
             raise ValueError("finding_id is required")
 
-        original_count = len(project.findings)
-        project.findings = [f for f in project.findings if f.finding_id != finding_id]
-
-        if len(project.findings) < original_count:
-            save_findings_to_file(project)
-            save_project_to_file(project)
+        if delete_finding_from_project(project, finding_id):
             return {
                 "finding_id": finding_id,
                 "deleted": True,

@@ -94,6 +94,38 @@ GO_INSTALLED=false
 
 # ── Go ─────────────────────────────────────────────────────────────────────
 
+install_playwright_browser() {
+    echo ""
+    echo "[INFO] Installing Playwright Chromium browser..."
+
+    if [[ "$OS" == "linux" ]]; then
+        if ! uv run playwright install --with-deps chromium; then
+            echo "[WARNING] Playwright install with system dependencies failed."
+            echo "[INFO] Retrying browser-only Playwright install..."
+            if ! uv run playwright install chromium; then
+                echo "✗ Failed to install Playwright Chromium browser"
+                return 1
+            fi
+        fi
+    elif ! uv run playwright install chromium; then
+        echo "✗ Failed to install Playwright Chromium browser"
+        return 1
+    fi
+
+    if uv run python - <<'PY'
+from netpal.utils.tool_paths import check_playwright_installed
+raise SystemExit(0 if check_playwright_installed() else 1)
+PY
+    then
+        echo "✓ Playwright Chromium browser installed"
+        PLAYWRIGHT_INSTALLED=true
+        return 0
+    fi
+
+    echo "✗ Playwright installed but Chromium could not be launched"
+    return 1
+}
+
 install_go() {
     echo "[INFO] Installing Go..."
     if [[ "$OS" == "linux" ]]; then
@@ -185,8 +217,6 @@ fi
 # ── Playwright is installed as a Python dependency via pyproject.toml ─────
 # The browser binaries are installed after the venv is set up (see below).
 
-PLAYWRIGHT_INSTALLED=true
-
 # ── nuclei (optional) ─────────────────────────────────────────────────────
 
 echo ""
@@ -251,11 +281,19 @@ if [ -d ".venv" ] && .venv/bin/python -c "import netpal" 2>/dev/null; then
     INSTALLED_VERSION=$(.venv/bin/python -c "import netpal; print(netpal.__version__)" 2>/dev/null || echo "unknown")
     echo "✓ NetPal is already installed (version: ${INSTALLED_VERSION})"
     echo ""
-    echo "  To reinstall, remove the virtual environment first:"
-    echo "    rm -rf .venv && bash install.sh"
+    echo "[INFO] Reusing existing virtual environment and ensuring dependencies are current..."
+    source .venv/bin/activate
+    uv sync --python 3.12
+    uv pip install -e .
+    if ! install_playwright_browser; then
+        echo ""
+        echo "✗ Existing installation refresh failed because Playwright could not be installed cleanly."
+        exit 1
+    fi
     echo ""
-    echo "  To update in-place:"
-    echo "    source .venv/bin/activate && uv sync --python 3.12 && uv pip install -e ."
+    echo "  Existing installation refreshed successfully."
+    echo "  To force a clean reinstall, run:"
+    echo "    rm -rf .venv && bash install.sh"
     echo ""
     exit 0
 fi
@@ -284,10 +322,11 @@ if [ "$NMAP_INSTALLED" = true ]; then
     echo "✓ NetPal installed"
 
     # Install Playwright browser binaries (Chromium)
-    echo ""
-    echo "[INFO] Installing Playwright Chromium browser..."
-    uv run playwright install --with-deps chromium
-    echo "✓ Playwright Chromium browser installed"
+    if ! install_playwright_browser; then
+        echo ""
+        echo "✗ Installation failed because Playwright could not be installed cleanly."
+        exit 1
+    fi
 
     # ── Passwordless sudo for nmap and chown ──────────────────────────────────
 

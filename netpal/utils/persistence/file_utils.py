@@ -8,6 +8,8 @@ import os
 import subprocess
 from pathlib import Path
 
+from .project_paths import ProjectPaths, get_base_scan_results_dir
+
 log = logging.getLogger(__name__)
 
 
@@ -78,7 +80,6 @@ def get_project_path(project_id):
     Returns:
         Path to project JSON file
     """
-    from .project_paths import ProjectPaths
     return ProjectPaths(project_id).get_project_json_path()
 
 
@@ -91,7 +92,6 @@ def get_findings_path(project_id):
     Returns:
         Path to findings JSON file
     """
-    from .project_paths import ProjectPaths
     return ProjectPaths(project_id).get_findings_json_path()
 
 
@@ -105,7 +105,6 @@ def get_scan_results_dir(project_id, asset_identifier=None):
     Returns:
         Path to scan results directory
     """
-    from .project_paths import ProjectPaths
     from ..naming_utils import sanitize_network_for_path
     
     paths = ProjectPaths(project_id)
@@ -125,7 +124,7 @@ def get_projects_registry_path():
     Returns:
         Path to projects.json file
     """
-    base_dir = Path.cwd() / "scan_results"
+    base_dir = Path(get_base_scan_results_dir())
     return str(base_dir / "projects.json")
 
 
@@ -138,7 +137,7 @@ def load_projects_registry():
     """
     from .local_cleanup import cleanup_legacy_local_storage
 
-    cleanup_legacy_local_storage(scan_results_dir=Path.cwd() / "scan_results")
+    cleanup_legacy_local_storage(scan_results_dir=Path(get_base_scan_results_dir()))
     registry_path = get_projects_registry_path()
     registry = load_json(registry_path, {"projects": []})
     
@@ -163,7 +162,15 @@ def save_projects_registry(registry):
     return save_json(registry_path, registry, compact=False)
 
 
-def register_project(project_id, project_name, updated_utc_ts, external_id=""):
+def register_project(
+    project_id,
+    project_name,
+    updated_utc_ts,
+    external_id="",
+    ad_domain="",
+    ad_dc_ip="",
+    metadata=None,
+):
     """
     Register or update a project in the registry.
 
@@ -177,6 +184,7 @@ def register_project(project_id, project_name, updated_utc_ts, external_id=""):
         True if successful
     """
     registry = load_projects_registry()
+    metadata = metadata if metadata is not None else {}
     
     # Find existing project entry
     existing = None
@@ -190,6 +198,9 @@ def register_project(project_id, project_name, updated_utc_ts, external_id=""):
         "id": project_id,
         "name": project_name,
         "external_id": external_id,
+        "ad_domain": ad_domain,
+        "ad_dc_ip": ad_dc_ip,
+        "metadata": metadata,
         "updated_utc_ts": updated_utc_ts,
     }
     
@@ -255,8 +266,7 @@ def delete_project_locally(project_id):
         os.remove(findings_path)
     
     # Delete scan results directory
-    from pathlib import Path
-    scan_dir = Path.cwd() / "scan_results" / project_id
+    scan_dir = Path(ProjectPaths(project_id).get_project_directory())
     if scan_dir.exists():
         shutil.rmtree(scan_dir)
     
@@ -275,9 +285,7 @@ def fix_scan_results_permissions():
     try:
         import getpass
         import subprocess
-        from pathlib import Path
-
-        scan_dir = Path.cwd() / "scan_results"
+        scan_dir = Path(get_base_scan_results_dir())
         if scan_dir.exists():
             user = getpass.getuser()
             subprocess.run(
@@ -338,7 +346,7 @@ def make_path_relative_to_scan_results(filepath):
     path = Path(filepath)
     
     # Get the scan_results base directory
-    scan_results_base = Path.cwd() / "scan_results"
+    scan_results_base = Path(get_base_scan_results_dir())
     
     # If the path is absolute and contains scan_results, make it relative
     if path.is_absolute():
@@ -382,5 +390,4 @@ def resolve_scan_results_path(relative_path: str) -> str:
     # If already absolute, return as-is
     if os.path.isabs(relative_path):
         return relative_path
-    from .project_paths import get_base_scan_results_dir
     return os.path.join(get_base_scan_results_dir(), relative_path)

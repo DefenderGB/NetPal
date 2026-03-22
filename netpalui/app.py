@@ -59,6 +59,8 @@ def _load_projects(scan_path):
             )
         else:
             p["updated_str"] = "N/A"
+        metadata = p.get("metadata", {}) or {}
+        p["description"] = metadata.get("description", "")
         projects.append(p)
     return projects
 
@@ -213,6 +215,7 @@ def project_summary(project_id):
         abort(404, f"Project {project_id} not found")
 
     hosts = data.get("hosts", [])
+    metadata = data.get("metadata", {}) or {}
 
     # --- Metrics ---
     total_services = sum(len(h.get("services", [])) for h in hosts)
@@ -249,6 +252,7 @@ def project_summary(project_id):
             "ip": host.get("ip", ""),
             "hostname": host.get("hostname", ""),
             "os": host.get("os", ""),
+            "network_id": host.get("network_id", "unknown"),
             "services": [],
         }
         for svc in host.get("services", []):
@@ -308,13 +312,16 @@ def project_summary(project_id):
         if hid is not None and hid in host_map:
             f["host_ip"] = host_map[hid].get("ip", "Unknown")
             f["host_hostname"] = host_map[hid].get("hostname", "")
+            f["host_network_id"] = host_map[hid].get("network_id", "unknown")
         else:
             f["host_ip"] = "Unknown"
             f["host_hostname"] = ""
+            f["host_network_id"] = "unknown"
 
     return render_template(
         "project.html",
         project=data,
+        project_description=metadata.get("description", ""),
         project_id=project_id,
         host_count=len(hosts),
         service_count=total_services,

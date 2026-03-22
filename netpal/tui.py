@@ -9,7 +9,7 @@ import os
 from contextlib import contextmanager
 from pathlib import Path
 
-from textual import on, work
+from textual import events, on, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
@@ -17,6 +17,7 @@ from textual.reactive import reactive
 from textual.screen import ModalScreen
 from textual.widgets import (
     Button,
+    Checkbox,
     ContentSwitcher,
     DataTable,
     Footer,
@@ -32,6 +33,51 @@ from textual.widgets import (
 # ---------------------------------------------------------------------------
 # Lazy helpers — import netpal internals only when needed
 # ---------------------------------------------------------------------------
+
+
+def _should_ignore_table_click(table: DataTable, meta: dict) -> bool:
+    """Return True for stale/out-of-bounds table clicks that should be ignored."""
+    if "row" not in meta or "column" not in meta:
+        return False
+
+    row_index = meta["row"]
+    column_index = meta["column"]
+    is_header_click = table.show_header and row_index == -1
+    is_row_label_click = table.show_row_labels and column_index == -1
+
+    if is_header_click:
+        return (
+            meta.get("out_of_bounds", False)
+            or column_index < 0
+            or column_index >= len(table.ordered_columns)
+        )
+
+    if is_row_label_click:
+        return row_index < 0 or row_index >= len(table.ordered_rows)
+
+    return False
+
+
+class SafeDataTable(DataTable):
+    """DataTable wrapper that ignores stale header clicks after table refreshes."""
+
+    async def _on_click(self, event: events.Click) -> None:
+        if _should_ignore_table_click(self, event.style.meta):
+            return
+        await super()._on_click(event)
+
+
+class SectionIntro(Horizontal):
+    """Inline section title + description row for main TUI views."""
+
+    def __init__(self, title: str, description: str) -> None:
+        super().__init__(classes="section-intro-row")
+        self._title = title
+        self._description = description
+
+    def compose(self) -> ComposeResult:
+        yield Static(self._title, classes="section-title section-intro-title")
+        yield Static(self._description, classes="info-text section-intro-text")
 
 
 def _load_config():
@@ -85,6 +131,109 @@ def _get_interfaces_with_valid_ips():
     return [(iface, ip) for iface, ip in get_interfaces_with_ips() if ip]
 
 
+def _starter_asset_target_prompt(asset_type) -> tuple[str, str, bool]:
+    """Return label, placeholder, and enabled-state for the starter asset input."""
+    if asset_type in (None, "", Select.BLANK):
+        return (
+            "Asset Target (optional)",
+            "Select an asset type to add an initial asset",
+            False,
+        )
+
+    asset_type = str(asset_type)
+    if asset_type == "network":
+        return ("Asset Target (CIDR)", 'e.g. 10.0.0.0/24', True)
+    if asset_type == "single":
+        return ("Asset Target (host/IP)", 'e.g. 10.0.0.10 or app.example.com', True)
+    if asset_type == "list":
+        return (
+            "Asset Target (.txt path or comma-list)",
+            'e.g. 10.0.0.10,10.0.0.11 or /tmp/targets.txt',
+            True,
+        )
+    return ("Asset Target", "Enter an asset target", True)
+
+
+def _build_starter_asset_name(asset_type: str, asset_target: str) -> str:
+    """Build a human-readable default name for a starter asset."""
+    asset_type = str(asset_type)
+    target = asset_target.strip()
+
+    if asset_type == "list":
+        if target.lower().endswith(".txt"):
+            summary = os.path.basename(os.path.expanduser(target))
+        else:
+            targets = [item.strip() for item in target.split(",") if item.strip()]
+            summary = targets[0] if targets else "targets"
+            if len(targets) > 1:
+                summary += " +more"
+        prefix = "List"
+    elif asset_type == "network":
+        summary = target
+        prefix = "Network"
+    elif asset_type == "single":
+        summary = target
+        prefix = "Target"
+    else:
+        summary = target or "asset"
+        prefix = "Asset"
+
+    if len(summary) > 40:
+        summary = summary[:37] + "..."
+
+    return f"{prefix} {summary}".strip()
+
+
+def _prepare_starter_asset(asset_type, asset_target: str):
+    """Validate and normalize the optional starter asset from project creation."""
+    target = asset_target.strip()
+
+    if asset_type in (None, "", Select.BLANK):
+        if target:
+            raise ValueError("Select an asset type or clear the asset target.")
+        return None
+
+    asset_type = str(asset_type)
+    if not target:
+        raise ValueError("Asset target is required when an asset type is selected.")
+
+    if asset_type == "network":
+        from netpal.utils.network_utils import validate_cidr
+
+        is_valid, error_msg = validate_cidr(target)
+        if not is_valid:
+            raise ValueError(error_msg)
+        target_data = target
+    elif asset_type == "single":
+        from netpal.utils.validation import validate_target
+
+        is_valid, _, error_msg = validate_target(target)
+        if not is_valid:
+            raise ValueError(error_msg)
+        target_data = target
+    elif asset_type == "list":
+        if target.lower().endswith(".txt"):
+            file_path = os.path.abspath(os.path.expanduser(target))
+            if not os.path.isfile(file_path):
+                raise ValueError(f"File not found: {file_path}")
+            target_data = {"file": file_path}
+        else:
+            targets = [item.strip() for item in target.split(",") if item.strip()]
+            if not targets:
+                raise ValueError(
+                    "List asset target must be a .txt file path or comma-separated targets."
+                )
+            target_data = ",".join(targets)
+    else:
+        raise ValueError(f"Unknown asset type: {asset_type}")
+
+    return {
+        "type": asset_type,
+        "name": _build_starter_asset_name(asset_type, target),
+        "target_data": target_data,
+    }
+
+
 def _severity_color(severity: str) -> str:
     return {
         "Critical": "bold red",
@@ -93,6 +242,27 @@ def _severity_color(severity: str) -> str:
         "Low": "cyan",
         "Info": "dim",
     }.get(severity, "white")
+
+
+def _duplicate_ip_set(project) -> set[str]:
+    """Return the set of IPs that appear more than once in a project."""
+    if not project:
+        return set()
+    seen: dict[str, int] = {}
+    for host in project.hosts:
+        seen[host.ip] = seen.get(host.ip, 0) + 1
+    return {ip for ip, count in seen.items() if count > 1}
+
+
+def _host_label(host, duplicate_ips: set[str] | None = None) -> str:
+    """Return a stable human-readable host label."""
+    duplicate_ips = duplicate_ips or set()
+    label = host.ip
+    if host.hostname:
+        label += f" ({host.hostname})"
+    if host.ip in duplicate_ips:
+        label += f" [{getattr(host, 'network_id', 'unknown')}]"
+    return label
 
 # ---------------------------------------------------------------------------
 # File-path suggestion helper
@@ -212,9 +382,22 @@ VIEW_TOOLS = "view-tools"
 VIEW_HOSTS = "view-hosts"
 VIEW_FINDINGS = "view-findings"
 VIEW_EVIDENCE = "view-evidence"
+VIEW_AD_SCAN = "view-ad-scan"
+VIEW_TESTCASES = "view-testcases"
 VIEW_SETTINGS = "view-settings"
 
-ALL_VIEWS = [VIEW_PROJECTS, VIEW_ASSETS, VIEW_RECON, VIEW_TOOLS, VIEW_HOSTS, VIEW_FINDINGS, VIEW_EVIDENCE, VIEW_SETTINGS]
+ALL_VIEWS = [
+    VIEW_PROJECTS,
+    VIEW_ASSETS,
+    VIEW_RECON,
+    VIEW_TOOLS,
+    VIEW_HOSTS,
+    VIEW_FINDINGS,
+    VIEW_EVIDENCE,
+    VIEW_AD_SCAN,
+    VIEW_TESTCASES,
+    VIEW_SETTINGS,
+]
 
 VIEW_LABELS = {
     VIEW_PROJECTS: "Projects",
@@ -224,6 +407,8 @@ VIEW_LABELS = {
     VIEW_HOSTS: "Hosts",
     VIEW_FINDINGS: "Findings",
     VIEW_EVIDENCE: "AI Enhance",
+    VIEW_AD_SCAN: "AD Scan",
+    VIEW_TESTCASES: "Test Cases",
     VIEW_SETTINGS: "Settings",
 }
 
@@ -271,6 +456,21 @@ Screen {
     color: $text-muted;
     margin-bottom: 1;
 }
+.section-intro-row {
+    width: 1fr;
+    height: auto;
+    margin-bottom: 1;
+}
+.section-intro-title {
+    width: auto;
+    min-width: 0;
+    margin: 0 1 0 0;
+}
+.section-intro-text {
+    width: 1fr;
+    min-width: 0;
+    margin: 0;
+}
 #active-context {
     dock: top;
     height: 1;
@@ -279,6 +479,9 @@ Screen {
     color: $text-muted;
 }
 /* Modal dialog styling */
+.standard-modal-screen {
+    align: left top;
+}
 .modal-dialog {
     width: 70;
     height: auto;
@@ -287,6 +490,66 @@ Screen {
     padding: 1 2;
     background: $surface;
 }
+.standard-modal-dialog {
+    width: 1fr;
+    height: 1fr;
+    max-width: 100%;
+    max-height: 100%;
+    border: none;
+    padding: 1 1;
+}
+.standard-modal-dialog-boxed {
+    width: 1fr;
+    height: 1fr;
+    max-width: 100%;
+    max-height: 100%;
+    border: none;
+    padding: 1 1;
+}
+.standard-modal-row {
+    height: auto;
+    margin: 0 0 1 0;
+}
+.standard-modal-col-left {
+    width: 1fr;
+    min-width: 0;
+    padding: 0 1 0 0;
+}
+.standard-modal-col-mid {
+    width: 1fr;
+    min-width: 0;
+    padding: 0 1;
+}
+.standard-modal-col-right {
+    width: 1fr;
+    min-width: 0;
+    padding: 0 0 0 1;
+}
+.standard-modal-half-left {
+    width: 1fr;
+    min-width: 0;
+    padding: 0 1 0 0;
+}
+.standard-modal-half-right {
+    width: 1fr;
+    min-width: 0;
+    padding: 0 0 0 1;
+}
+.standard-modal-full {
+    width: 1fr;
+    min-width: 0;
+    margin: 0 0 1 0;
+}
+.standard-modal-message {
+    width: 1fr;
+    margin: 0 0 1 0;
+}
+.project-readonly {
+    height: 3;
+    padding: 1 0 0 0;
+    color: $text-muted;
+    width: 1fr;
+}
 .modal-buttons {
     margin-top: 1;
     height: 3;
@@ -294,12 +557,39 @@ Screen {
 .modal-buttons Button {
     margin: 0 1;
 }
+.standard-modal-buttons {
+    margin-top: 0;
+    height: 3;
+}
+.standard-modal-buttons Button {
+    margin: 0 1 0 0;
+    width: 10;
+    height: 3;
+}
 #proj-action-bar {
     height: 3;
     margin-top: 1;
 }
 #proj-action-bar Button {
     margin: 0 1;
+}
+#findings-action-bar {
+    height: 3;
+    margin-bottom: 1;
+}
+#findings-action-bar Button {
+    width: 18;
+    height: 3;
+}
+#findings-table {
+    height: auto;
+    min-height: 8;
+    max-height: 30%;
+}
+#finding-detail-panel {
+    margin-top: 1;
+    padding: 1 2;
+    border: solid $primary;
 }
 /* Host detail panel */
 #host-detail-panel {
@@ -346,33 +636,75 @@ Screen {
 # ╚══════════════════════════════════════════════════════════════════════════╝
 
 
-class CreateProjectScreen(ModalScreen):
+class StandardModalScreen(ModalScreen):
+    """Shared modal shell styling for full-screen TUI popups."""
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.add_class("standard-modal-screen")
+
+
+class CreateProjectScreen(StandardModalScreen):
     """Modal screen for creating a new project."""
 
     DEFAULT_CSS = """
-    CreateProjectScreen {
-        align: center middle;
+    .starter-asset-suggestion {
+        height: 1;
+        margin: 0;
+        padding: 0 1;
+        color: cyan;
+    }
+    .starter-asset-suggestion:hover {
+        background: $accent;
+        color: white;
+        text-style: bold;
     }
     """
 
     def compose(self) -> ComposeResult:
-        with Vertical(classes="modal-dialog compact-form"):
+        with Vertical(classes="modal-dialog standard-modal-dialog compact-form"):
             yield Static("[bold]Create New Project[/]", classes="section-title")
-            with Horizontal():
-                with Vertical():
+            with Horizontal(classes="standard-modal-row"):
+                with Vertical(classes="standard-modal-col-left"):
                     yield Label("Project Name")
                     yield Input(id="new-proj-name", placeholder="e.g. Q1 External Pentest")
-            with Horizontal():
-                with Vertical():
-                    yield Label("Description (optional)")
-                    yield Input(id="new-proj-desc", placeholder="e.g. Quarterly external assessment")
-                with Vertical():
+                with Vertical(classes="standard-modal-col-mid"):
                     yield Label("External ID (optional)")
                     yield Input(id="new-proj-ext-id", placeholder="e.g. TICKET-1234")
+                with Vertical(classes="standard-modal-col-right"):
+                    yield Label("Description (optional)")
+                    yield Input(id="new-proj-desc", placeholder="e.g. Quarterly external assessment")
+            with Horizontal(classes="standard-modal-row"):
+                with Vertical(classes="standard-modal-col-left"):
+                    yield Label("AD Domain (optional)")
+                    yield Input(id="new-proj-ad-domain", placeholder="e.g. corp.local")
+                with Vertical(classes="standard-modal-col-mid"):
+                    yield Label("DC IP (optional)")
+                    yield Input(id="new-proj-dc-ip", placeholder="e.g. 10.10.10.10")
+                with Vertical(classes="standard-modal-col-right"):
+                    yield Label("Asset Type (optional)")
+                    yield Select(
+                        [("network", "network"), ("list", "list"), ("single", "single")],
+                        id="new-proj-asset-type",
+                        allow_blank=True,
+                        prompt="Optional",
+                    )
+            with Vertical(classes="standard-modal-full"):
+                yield Label("Asset Target (optional)", id="new-proj-asset-target-label")
+                yield Input(
+                    id="new-proj-asset-target",
+                    placeholder="Select an asset type to add an initial asset",
+                )
+                for i in range(5):
+                    yield Static("", id=f"new-proj-asset-sug-{i}", classes="starter-asset-suggestion")
             yield Static("", id="new-proj-status")
-            with Horizontal(classes="modal-buttons"):
-                yield Button("Create", id="btn-do-create", variant="success")
-                yield Button("Cancel", id="btn-cancel-create", variant="default")
+            with Horizontal(classes="modal-buttons standard-modal-buttons"):
+                yield Button("Create", id="btn-do-create", variant="success", classes="project-modal-button")
+                yield Button("Cancel", id="btn-cancel-create", variant="default", classes="project-modal-button")
+
+    def on_mount(self) -> None:
+        self._update_starter_asset_prompt(Select.BLANK)
+        self._clear_starter_asset_suggestions()
 
     @on(Button.Pressed, "#btn-do-create")
     def _handle_create(self, event: Button.Pressed) -> None:
@@ -382,16 +714,80 @@ class CreateProjectScreen(ModalScreen):
     def _handle_cancel(self, event: Button.Pressed) -> None:
         self.dismiss(None)
 
+    @on(Select.Changed, "#new-proj-asset-type")
+    def _handle_asset_type_changed(self, event: Select.Changed) -> None:
+        self._update_starter_asset_prompt(event.value)
+
+    @on(Input.Changed, "#new-proj-asset-target")
+    def _handle_starter_asset_target_changed(self, event: Input.Changed) -> None:
+        asset_type = self.query_one("#new-proj-asset-type", Select).value
+        if str(asset_type) != "list":
+            self._clear_starter_asset_suggestions()
+            return
+        self._update_starter_asset_suggestions(event.value)
+
+    def _update_starter_asset_prompt(self, asset_type) -> None:
+        label_text, placeholder, enabled = _starter_asset_target_prompt(asset_type)
+        label = self.query_one("#new-proj-asset-target-label", Label)
+        target_input = self.query_one("#new-proj-asset-target", Input)
+        label.update(label_text)
+        target_input.placeholder = placeholder
+        target_input.disabled = not enabled
+        if str(asset_type) == "list":
+            self._update_starter_asset_suggestions(target_input.value)
+        else:
+            self._clear_starter_asset_suggestions()
+
+    def _clear_starter_asset_suggestions(self) -> None:
+        for i in range(5):
+            suggestion = self.query_one(f"#new-proj-asset-sug-{i}", Static)
+            suggestion.update("")
+            suggestion.display = False
+            suggestion._suggestion_path = ""
+
+    def _update_starter_asset_suggestions(self, value: str) -> None:
+        suggestions = _get_path_suggestions(value, limit=5)
+        for i in range(5):
+            suggestion = self.query_one(f"#new-proj-asset-sug-{i}", Static)
+            if i < len(suggestions):
+                suggestion.update(f"→ {suggestions[i]}")
+                suggestion.display = True
+                suggestion._suggestion_path = suggestions[i]
+            else:
+                suggestion.update("")
+                suggestion.display = False
+                suggestion._suggestion_path = ""
+
+    def on_click(self, event) -> None:
+        """Fill the starter asset input when a suggestion is clicked."""
+        widget = self.screen.get_widget_at(event.screen_x, event.screen_y)
+        if widget and hasattr(widget, "classes") and "starter-asset-suggestion" in widget.classes:
+            path = getattr(widget, "_suggestion_path", "")
+            if path:
+                target_input = self.query_one("#new-proj-asset-target", Input)
+                target_input.value = path
+
     def _create_project(self) -> None:
+        from netpal.utils.asset_factory import create_asset_headless
         from netpal.utils.persistence.project_utils import create_project_headless
 
         status = self.query_one("#new-proj-status", Static)
         name = self.query_one("#new-proj-name", Input).value.strip()
         description = self.query_one("#new-proj-desc", Input).value.strip()
         external_id = self.query_one("#new-proj-ext-id", Input).value.strip()
+        ad_domain = self.query_one("#new-proj-ad-domain", Input).value.strip()
+        ad_dc_ip = self.query_one("#new-proj-dc-ip", Input).value.strip()
+        asset_type = self.query_one("#new-proj-asset-type", Select).value
+        asset_target = self.query_one("#new-proj-asset-target", Input).value.strip()
 
         if not name:
             status.update("[red]Project name is required.[/]")
+            return
+
+        try:
+            starter_asset = _prepare_starter_asset(asset_type, asset_target)
+        except ValueError as exc:
+            status.update(f"[yellow]{exc}[/]")
             return
 
         config = self.app.config or {}
@@ -402,23 +798,120 @@ class CreateProjectScreen(ModalScreen):
                 config=config,
                 description=description,
                 external_id=external_id,
+                ad_domain=ad_domain,
+                ad_dc_ip=ad_dc_ip,
             )
+            created_asset = None
+            asset_error = ""
+            if starter_asset:
+                try:
+                    created_asset = create_asset_headless(
+                        project,
+                        starter_asset["type"],
+                        starter_asset["name"],
+                        starter_asset["target_data"],
+                    )
+                except Exception as exc:
+                    asset_error = str(exc)
             _set_active_project(name, self.app.config)
-            self.dismiss(project)
+            self.dismiss(
+                {
+                    "project": project,
+                    "asset": created_asset,
+                    "asset_error": asset_error,
+                }
+            )
         except ValueError as exc:
             status.update(f"[yellow]{exc}[/]")
         except Exception as exc:
             status.update(f"[red]Error creating project: {exc}[/]")
 
 
-class DeleteProjectScreen(ModalScreen):
-    """Modal screen for confirming project deletion."""
+class EditProjectScreen(StandardModalScreen):
+    """Modal screen for editing an existing project's metadata."""
 
-    DEFAULT_CSS = """
-    DeleteProjectScreen {
-        align: center middle;
-    }
-    """
+    def __init__(self, project) -> None:
+        super().__init__()
+        self._project = project
+
+    def compose(self) -> ComposeResult:
+        project = self._project
+        with Vertical(classes="modal-dialog standard-modal-dialog compact-form"):
+            yield Static("[bold]Edit Project[/]", classes="section-title")
+            with Horizontal(classes="standard-modal-row"):
+                with Vertical(classes="standard-modal-col-left"):
+                    yield Label("Project Name")
+                    yield Input(id="edit-proj-name", value=project.name)
+                with Vertical(classes="standard-modal-col-mid"):
+                    yield Label("Project ID")
+                    yield Static(project.project_id, id="edit-proj-id", classes="project-readonly")
+                with Vertical(classes="standard-modal-col-right"):
+                    yield Label("Description")
+                    yield Input(id="edit-proj-desc", value=project.description or "")
+            with Horizontal(classes="standard-modal-row"):
+                with Vertical(classes="standard-modal-col-left"):
+                    yield Label("External ID")
+                    yield Input(id="edit-proj-ext-id", value=project.external_id or "")
+                with Vertical(classes="standard-modal-col-mid"):
+                    yield Label("AD Domain")
+                    yield Input(id="edit-proj-ad-domain", value=project.ad_domain or "")
+                with Vertical(classes="standard-modal-col-right"):
+                    yield Label("DC IP")
+                    yield Input(id="edit-proj-dc-ip", value=project.ad_dc_ip or "")
+            yield Static("", id="edit-proj-status")
+            with Horizontal(classes="modal-buttons standard-modal-buttons"):
+                yield Button("Save", id="btn-do-edit-project", variant="success", classes="project-modal-button")
+                yield Button("Cancel", id="btn-cancel-edit-project", variant="default", classes="project-modal-button")
+
+    @on(Button.Pressed, "#btn-do-edit-project")
+    def _handle_save(self, event: Button.Pressed) -> None:
+        self._save_project()
+
+    @on(Button.Pressed, "#btn-cancel-edit-project")
+    def _handle_cancel(self, event: Button.Pressed) -> None:
+        self.dismiss(None)
+
+    def _save_project(self) -> None:
+        from netpal.utils.persistence.file_utils import list_registered_projects
+
+        status = self.query_one("#edit-proj-status", Static)
+        project = self._project
+
+        new_name = self.query_one("#edit-proj-name", Input).value.strip()
+        new_desc = self.query_one("#edit-proj-desc", Input).value.strip()
+        new_ext_id = self.query_one("#edit-proj-ext-id", Input).value.strip()
+        new_ad_domain = self.query_one("#edit-proj-ad-domain", Input).value.strip()
+        new_ad_dc_ip = self.query_one("#edit-proj-dc-ip", Input).value.strip()
+
+        if not new_name:
+            status.update("[red]Project name is required.[/]")
+            return
+
+        for entry in list_registered_projects():
+            if entry.get("id") == project.project_id:
+                continue
+            if entry.get("name", "").lower() == new_name.lower():
+                status.update(f"[red]A project named '{entry.get('name')}' already exists.[/]")
+                return
+
+        old_name = project.name
+        project.name = new_name
+        project.description = new_desc
+        project.external_id = new_ext_id
+        project.ad_domain = new_ad_domain
+        project.ad_dc_ip = new_ad_dc_ip
+
+        if project.save_to_file():
+            if old_name != new_name:
+                _set_active_project(new_name, self.app.config)
+            self.dismiss(project)
+            return
+
+        status.update("[red]Failed to save project metadata.[/]")
+
+
+class DeleteProjectScreen(StandardModalScreen):
+    """Modal screen for confirming project deletion."""
 
     def __init__(self, project) -> None:
         super().__init__()
@@ -427,16 +920,18 @@ class DeleteProjectScreen(ModalScreen):
     def compose(self) -> ComposeResult:
         p = self._project
         svc_count = sum(len(h.services) for h in p.hosts) if p else 0
-        with Vertical(classes="modal-dialog"):
+        with Vertical(classes="modal-dialog standard-modal-dialog compact-form"):
             yield Static("[bold red]Delete Project[/]", classes="section-title")
             yield Static(
                 f'Are you sure you want to delete "[bold]{p.name}[/]" project '
                 f"and all its resources "
                 f"({len(p.assets)} assets, {len(p.hosts)} hosts, "
                 f"{svc_count} services, {len(p.findings)} findings)?"
+                ,
+                classes="standard-modal-message",
             )
             yield Static("", id="delete-status")
-            with Horizontal(classes="modal-buttons"):
+            with Horizontal(classes="modal-buttons standard-modal-buttons"):
                 yield Button("Delete", id="btn-do-delete", variant="error")
                 yield Button("Cancel", id="btn-cancel-delete", variant="default")
 
@@ -459,13 +954,10 @@ class DeleteProjectScreen(ModalScreen):
             status.update(f"[red]Error deleting project: {exc}[/]")
 
 
-class CreateAssetScreen(ModalScreen):
+class CreateAssetScreen(StandardModalScreen):
     """Modal screen for creating a new asset."""
 
     DEFAULT_CSS = """
-    CreateAssetScreen {
-        align: center middle;
-    }
     .file-suggestion {
         height: 1;
         margin: 0;
@@ -480,30 +972,30 @@ class CreateAssetScreen(ModalScreen):
     """
 
     def compose(self) -> ComposeResult:
-        with Vertical(classes="modal-dialog compact-form"):
+        with Vertical(classes="modal-dialog standard-modal-dialog compact-form"):
             yield Static("[bold]Create New Asset[/]", classes="section-title")
-            with Horizontal():
-                with Vertical():
+            with Horizontal(classes="standard-modal-row"):
+                with Vertical(classes="standard-modal-half-left"):
                     yield Label("Type")
                     yield Select(
                         [("network", "network"), ("list", "list"), ("single", "single")],
                         id="new-asset-type",
                         value="network",
                     )
-                with Vertical():
+                with Vertical(classes="standard-modal-half-right"):
                     yield Label("Name")
                     yield Input(id="new-asset-name", placeholder="e.g. DMZ Network")
-            with Horizontal():
-                with Vertical(id="new-asset-target-group"):
+            with Horizontal(classes="standard-modal-row"):
+                with Vertical(id="new-asset-target-group", classes="standard-modal-full"):
                     yield Label("Target data (CIDR / Comma-list / single IP)")
                     yield Input(id="new-asset-target", placeholder="e.g. 10.0.0.0/24")
-                with Vertical(id="new-asset-file-group"):
+                with Vertical(id="new-asset-file-group", classes="standard-modal-full"):
                     yield Label(f"File Path (Starting in {os.getcwd()})")
                     yield Input(id="new-asset-file", placeholder="e.g. /path/to/hosts.txt")
                     for i in range(5):
                         yield Static("", id=f"file-sug-{i}", classes="file-suggestion")
             yield Static("", id="new-asset-status")
-            with Horizontal(classes="modal-buttons"):
+            with Horizontal(classes="modal-buttons standard-modal-buttons"):
                 yield Button("Create", id="btn-do-create-asset", variant="success")
                 yield Button("Cancel", id="btn-cancel-create-asset", variant="default")
 
@@ -592,14 +1084,8 @@ class CreateAssetScreen(ModalScreen):
             status.update(f"[red]Error: {exc}[/]")
 
 
-class DeleteAssetScreen(ModalScreen):
+class DeleteAssetScreen(StandardModalScreen):
     """Modal screen for confirming asset deletion."""
-
-    DEFAULT_CSS = """
-    DeleteAssetScreen {
-        align: center middle;
-    }
-    """
 
     def __init__(self, asset, project) -> None:
         super().__init__()
@@ -608,15 +1094,17 @@ class DeleteAssetScreen(ModalScreen):
 
     def compose(self) -> ComposeResult:
         a = self._asset
-        with Vertical(classes="modal-dialog"):
+        with Vertical(classes="modal-dialog standard-modal-dialog compact-form"):
             yield Static("[bold red]Delete Asset[/]", classes="section-title")
             yield Static(
                 f'Are you sure you want to delete asset "[bold]{a.name}[/]" '
                 f"({a.type}: {a.get_identifier()}, "
                 f"{len(a.associated_host)} associated hosts)?"
+                ,
+                classes="standard-modal-message",
             )
             yield Static("", id="delete-asset-status")
-            with Horizontal(classes="modal-buttons"):
+            with Horizontal(classes="modal-buttons standard-modal-buttons"):
                 yield Button("Delete", id="btn-do-delete-asset", variant="error")
                 yield Button("Cancel", id="btn-cancel-delete-asset", variant="default")
 
@@ -639,6 +1127,230 @@ class DeleteAssetScreen(ModalScreen):
             status.update(f"[red]Error deleting asset: {exc}[/]")
 
 
+class CreateFindingScreen(ModalScreen):
+    """Modal screen for manually creating a new finding."""
+
+    DEFAULT_CSS = """
+    CreateFindingScreen {
+        align: center middle;
+    }
+    .finding-form {
+        width: 90;
+        height: auto;
+        max-height: 90%;
+        border: thick $primary;
+        padding: 1 2;
+        background: $surface;
+    }
+    .finding-form Label {
+        margin: 0;
+        padding: 0;
+        height: 1;
+    }
+    .finding-form Input {
+        margin: 0;
+        height: 3;
+    }
+    .finding-form Select {
+        margin: 0;
+        height: 3;
+    }
+    .finding-form TextArea {
+        margin: 0;
+        height: 4;
+    }
+    .finding-form Horizontal {
+        height: auto;
+        margin: 0;
+        padding: 0;
+    }
+    .finding-form Vertical {
+        height: auto;
+        margin: 0;
+        padding: 0;
+    }
+    #proof-container {
+        height: auto;
+        max-height: 8;
+    }
+    """
+
+    def __init__(self, project) -> None:
+        super().__init__()
+        self._project = project
+
+    def compose(self) -> ComposeResult:
+        duplicate_ips = _duplicate_ip_set(self._project)
+        host_options = [
+            (_host_label(host, duplicate_ips), host.host_id)
+            for host in sorted(self._project.hosts, key=lambda h: (h.ip, getattr(h, "network_id", "unknown")))
+        ]
+        severity_options = [
+            ("Critical", "Critical"),
+            ("High", "High"),
+            ("Medium", "Medium"),
+            ("Low", "Low"),
+            ("Info", "Info"),
+        ]
+
+        with VerticalScroll(classes="finding-form"):
+            yield Static("[bold]Create Finding[/]", classes="section-title")
+            with Horizontal():
+                with Vertical():
+                    yield Label("Host")
+                    yield Select(host_options, id="finding-host", prompt="Select host")
+                with Vertical():
+                    yield Label("Port")
+                    yield Select([], id="finding-port", prompt="Optional port", allow_blank=True)
+            with Horizontal():
+                with Vertical():
+                    yield Label("Name")
+                    yield Input(id="finding-name", placeholder="e.g. SQL Injection in login form")
+                with Vertical():
+                    yield Label("Severity")
+                    yield Select(severity_options, id="finding-severity", value="Medium")
+            with Horizontal():
+                with Vertical():
+                    yield Label("CVSS")
+                    yield Input(id="finding-cvss", placeholder="Optional, e.g. 7.5")
+                with Vertical():
+                    yield Label("CWE")
+                    yield Input(id="finding-cwe", placeholder="Optional, e.g. CWE-89")
+            yield Label("Description")
+            yield TextArea(id="finding-description")
+            yield Label("Impact")
+            yield TextArea(id="finding-impact")
+            yield Label("Remediation")
+            yield TextArea(id="finding-remediation")
+            yield Label("Proof Files")
+            with VerticalScroll(id="proof-container"):
+                yield Static("[dim]Select a host to see available proofs.[/]", id="proof-placeholder")
+            yield Static("", id="finding-status")
+            with Horizontal(classes="modal-buttons"):
+                yield Button("Create", id="btn-do-create-finding", variant="success")
+                yield Button("Cancel", id="btn-cancel-create-finding", variant="default")
+
+    @on(Select.Changed, "#finding-host")
+    def _handle_host_changed(self, event: Select.Changed) -> None:
+        host_id = event.value
+        if host_id is Select.BLANK:
+            self._clear_port_options()
+            self._replace_proof_checkboxes(None)
+            return
+
+        host = self._project.get_host(host_id)
+        if not host:
+            self._clear_port_options()
+            self._replace_proof_checkboxes(None)
+            return
+
+        port_select = self.query_one("#finding-port", Select)
+        port_options = [
+            (
+                f"{svc.port}/{svc.protocol} ({svc.service_name or 'unknown'})",
+                svc.port,
+            )
+            for svc in sorted(host.services, key=lambda svc: svc.port)
+        ]
+        port_select.set_options(port_options)
+        self._replace_proof_checkboxes(host)
+
+    def _clear_port_options(self) -> None:
+        self.query_one("#finding-port", Select).set_options([])
+
+    def _replace_proof_checkboxes(self, host) -> None:
+        container = self.query_one("#proof-container", VerticalScroll)
+        container.remove_children()
+
+        if not host:
+            container.mount(Static("[dim]Select a host to see available proofs.[/]", id="proof-placeholder"))
+            return
+
+        proof_idx = 0
+        for service in sorted(host.services, key=lambda svc: svc.port):
+            for proof in service.proofs:
+                result_file = proof.get("result_file", "")
+                screenshot_file = proof.get("screenshot_file", "")
+                file_name = os.path.basename(result_file or screenshot_file or "")
+                pieces = [f"Port {service.port}"]
+                if proof.get("type"):
+                    pieces.append(proof["type"])
+                if file_name:
+                    pieces.append(file_name)
+                checkbox = Checkbox(" - ".join(pieces), id=f"proof-chk-{proof_idx}")
+                checkbox._proof_path = result_file or screenshot_file or ""
+                container.mount(checkbox)
+                proof_idx += 1
+
+        if proof_idx == 0:
+            container.mount(Static("[dim]No proofs available for this host.[/]", id="proof-placeholder"))
+
+    @on(Button.Pressed, "#btn-do-create-finding")
+    def _handle_create(self, event: Button.Pressed) -> None:
+        self._create_finding()
+
+    @on(Button.Pressed, "#btn-cancel-create-finding")
+    def _handle_cancel(self, event: Button.Pressed) -> None:
+        self.dismiss(None)
+
+    def _create_finding(self) -> None:
+        from netpal.utils.finding_factory import create_finding_headless
+
+        status = self.query_one("#finding-status", Static)
+
+        host_id = self.query_one("#finding-host", Select).value
+        if host_id is Select.BLANK:
+            status.update("[red]Select a host first.[/]")
+            return
+
+        port_value = self.query_one("#finding-port", Select).value
+        port = int(port_value) if port_value is not Select.BLANK and port_value is not None else 0
+
+        name = self.query_one("#finding-name", Input).value.strip()
+        severity_value = self.query_one("#finding-severity", Select).value
+        severity = str(severity_value) if severity_value is not Select.BLANK else "Medium"
+        cvss_raw = self.query_one("#finding-cvss", Input).value.strip()
+        cwe = self.query_one("#finding-cwe", Input).value.strip() or None
+        description = self.query_one("#finding-description", TextArea).text.strip()
+        impact = self.query_one("#finding-impact", TextArea).text.strip()
+        remediation = self.query_one("#finding-remediation", TextArea).text.strip()
+
+        cvss = None
+        if cvss_raw:
+            try:
+                cvss = float(cvss_raw)
+            except ValueError:
+                status.update("[red]CVSS must be a valid number.[/]")
+                return
+
+        proof_paths = []
+        for checkbox in self.query(Checkbox):
+            if checkbox.id and checkbox.id.startswith("proof-chk-") and checkbox.value:
+                proof_path = getattr(checkbox, "_proof_path", "")
+                if proof_path:
+                    proof_paths.append(proof_path)
+
+        try:
+            finding = create_finding_headless(
+                project=self._project,
+                host_id=host_id,
+                port=port,
+                name=name,
+                severity=severity,
+                description=description,
+                impact=impact,
+                remediation=remediation,
+                cvss=cvss,
+                cwe=cwe,
+                proof_file=", ".join(proof_paths) if proof_paths else None,
+            )
+            self.dismiss(finding)
+        except ValueError as exc:
+            status.update(f"[yellow]{exc}[/]")
+        except Exception as exc:
+            status.update(f"[red]Error creating finding: {exc}[/]")
+
+
 # ╔══════════════════════════════════════════════════════════════════════════╗
 # ║  VIEW WIDGETS (one per logical screen)                                   ║
 # ╚══════════════════════════════════════════════════════════════════════════╝
@@ -650,16 +1362,16 @@ class ProjectsView(VerticalScroll):
     """Project listing with action buttons."""
 
     def compose(self) -> ComposeResult:
-        yield Static("[bold]Project Selection[/]", classes="section-title")
-        yield Static(
+        yield SectionIntro(
+            "Project Selection",
             "Select an existing project or use the buttons below.",
-            classes="info-text",
         )
-        yield DataTable(id="proj-table")
+        yield SafeDataTable(id="proj-table")
         yield Static("", id="proj-detail")
 
         with Horizontal(id="proj-action-bar"):
             yield Button("➕ Create Project", id="btn-create-project", variant="success")
+            yield Button("✏ Edit Project", id="btn-edit-project", variant="primary")
             yield Button("🗑  Delete Project", id="btn-delete-project", variant="error")
         yield Static("", id="proj-status")
 
@@ -678,8 +1390,11 @@ class ProjectsView(VerticalScroll):
         delete_btn = self.query_one("#btn-delete-project", Button)
         delete_btn.disabled = project is None
 
+        edit_btn = self.query_one("#btn-edit-project", Button)
+        edit_btn.disabled = project is None
+
     def _refresh_table(self) -> None:
-        table = _reset_table(self, "proj-table", "  ", "Name", "ID", "External ID")
+        table = _reset_table(self, "proj-table", "  ", "Name", "ID", "External ID", "AD Domain")
         projects = _list_projects()
         active = self.app.config.get("project_name", "")
         detail = self.query_one("#proj-detail", Static)
@@ -693,16 +1408,26 @@ class ProjectsView(VerticalScroll):
                 p.get("name", ""),
                 p.get("id", ""),
                 p.get("external_id", "") or "—",
+                p.get("ad_domain", "") or "—",
                 key=p.get("id", ""),
             )
         # Update detail with active project info after table refresh
         project = self.app.project
         if project and project.name == active:
+            detail_parts = [
+                f"Selected Project: [green]Active → {project.name}[/]",
+                f"Assets: {len(project.assets)}",
+                f"Hosts: {len(project.hosts)}",
+                f"Findings: {len(project.findings)}",
+            ]
+            if project.description:
+                detail_parts.append(f"Desc: {project.description}")
+            if project.ad_domain:
+                detail_parts.append(f"AD: {project.ad_domain}")
+            if project.ad_dc_ip:
+                detail_parts.append(f"DC: {project.ad_dc_ip}")
             detail.update(
-                f"Selected Project: [green]Active → {project.name}[/]  |  "
-                f"Assets: {len(project.assets)}  |  "
-                f"Hosts: {len(project.hosts)}  |  "
-                f"Findings: {len(project.findings)}"
+                "  |  ".join(detail_parts)
             )
         elif active:
             detail.update(f"Selected Project: [dim]{active}[/]")
@@ -732,14 +1457,53 @@ class ProjectsView(VerticalScroll):
     def _handle_create(self, event: Button.Pressed) -> None:
         self.app.push_screen(CreateProjectScreen(), self._on_create_dismissed)
 
-    def _on_create_dismissed(self, project) -> None:
+    def _on_create_dismissed(self, result) -> None:
         """Callback when CreateProjectScreen is dismissed."""
-        if project is not None:
+        if result is not None:
+            if isinstance(result, dict):
+                project = result.get("project")
+                asset = result.get("asset")
+                asset_error = result.get("asset_error", "")
+            else:
+                project = result
+                asset = None
+                asset_error = ""
+
             self.app.project = project
             status = self.query_one("#proj-status", Static)
-            status.update(
-                f"[green]✔ Project '{project.name}' created and set as active "
-                f"(ID: {project.project_id})[/]"
+            if project:
+                if asset is not None:
+                    status.update(
+                        f"[green]✔ Project '{project.name}' created and set as active "
+                        f"with starter asset '{asset.name}' (ID: {project.project_id})[/]"
+                    )
+                elif asset_error:
+                    status.update(
+                        f"[yellow]Project '{project.name}' created and set as active "
+                        f"(ID: {project.project_id}), but the starter asset could not be added: "
+                        f"{asset_error}[/]"
+                    )
+                else:
+                    status.update(
+                        f"[green]✔ Project '{project.name}' created and set as active "
+                        f"(ID: {project.project_id})[/]"
+                    )
+        self.refresh_view()
+        self.app.refresh()
+
+    @on(Button.Pressed, "#btn-edit-project")
+    def _handle_edit(self, event: Button.Pressed) -> None:
+        project = self.app.project
+        if not project:
+            self.query_one("#proj-status", Static).update("[red]Select a project first.[/]")
+            return
+        self.app.push_screen(EditProjectScreen(project), self._on_edit_dismissed)
+
+    def _on_edit_dismissed(self, project) -> None:
+        if project is not None:
+            self.app.project = project
+            self.query_one("#proj-status", Static).update(
+                f"[green]✔ Project '{project.name}' updated successfully.[/]"
             )
         self.refresh_view()
         self.app.refresh()
@@ -776,12 +1540,11 @@ class AssetsView(VerticalScroll):
         self._selected_asset_name: str | None = None
 
     def compose(self) -> ComposeResult:
-        yield Static("[bold]Asset Management[/]", classes="section-title")
-        yield Static(
+        yield SectionIntro(
+            "Asset Management",
             "Select an asset row for details, or use the buttons below.",
-            classes="info-text",
         )
-        yield DataTable(id="asset-table")
+        yield SafeDataTable(id="asset-table")
         yield Static("", id="asset-detail")
 
         with Horizontal(id="proj-action-bar"):
@@ -906,6 +1669,8 @@ class AssetsView(VerticalScroll):
 
 SCAN_TYPES = [
     ("nmap-discovery", "nmap-discovery — Ping sweep (-sn)"),
+    ("port-discovery", "port-discovery — Common port probe (-Pn)"),
+    ("discover", "discover — Ping sweep + common port probe"),
     ("top100", "top100 — Top 100 ports (-sV)"),
     ("top1000", "top1000 — Top 1000 ports (-sV)"),
     ("http", "http — Common HTTP ports (-sV)"),
@@ -990,7 +1755,7 @@ class ReconView(VerticalScroll):
             yield Button("▶ Run Scan", id="btn-run-recon", variant="success")
 
         yield Static("", id="recon-status")
-        yield RichLog(id="recon-log", highlight=True, markup=True, min_width=80)
+        yield RichLog(id="recon-log", highlight=True, markup=True, min_width=80, wrap=True)
 
     def on_mount(self) -> None:
         self.refresh_view()
@@ -1080,15 +1845,12 @@ class ReconView(VerticalScroll):
                 f"__ASSET__:{a.name}",
             ))
 
-        # 4) Individual host IPs
-        for h in project.hosts:
-            label_parts = [h.ip]
-            if h.hostname:
-                label_parts.append(f"({h.hostname})")
-            label_parts.append(f"— {len(h.services)} svc")
+        # 4) Individual hosts
+        duplicate_ips = _duplicate_ip_set(project)
+        for h in sorted(project.hosts, key=lambda host: (host.ip, getattr(host, "network_id", "unknown"))):
             options.append((
-                f"🔹  Host: {' '.join(label_parts)}",
-                f"__HOST__:{h.ip}",
+                f"🔹  Host: {_host_label(h, duplicate_ips)} — {len(h.services)} svc",
+                f"__HOST_ID__:{h.host_id}",
             ))
 
         # 5) Chunk files from previous scan runs
@@ -1106,9 +1868,11 @@ class ReconView(VerticalScroll):
 
     @on(Select.Changed, "#recon-scan-type")
     def _handle_scan_type_changed(self, event: Select.Changed) -> None:
-        """Auto-switch Skip discovery to No when nmap-discovery is selected."""
-        if event.value == "nmap-discovery":
+        """Default Skip discovery based on scan type."""
+        if event.value in {"nmap-discovery", "port-discovery", "discover"}:
             self.query_one("#recon-skip-discovery", Select).value = False
+        else:
+            self.query_one("#recon-skip-discovery", Select).value = True
 
     @on(Button.Pressed, "#btn-run-recon")
     def _handle_run(self, event: Button.Pressed) -> None:
@@ -1169,17 +1933,23 @@ class ReconView(VerticalScroll):
                 scan_target = asset.get_identifier()
             target_label = f"asset {asset_name}"
 
-        elif selected.startswith("__HOST__:"):
-            host_ip = selected.split(":", 1)[1]
-            scan_target = host_ip
-            target_label = f"host {host_ip}"
+        elif selected.startswith("__HOST_ID__:"):
+            host_id_value = selected.split(":", 1)[1]
+            try:
+                selected_host = project.get_host(int(host_id_value))
+            except ValueError:
+                selected_host = None
+            if not selected_host:
+                self.app.call_from_thread(
+                    status.update, "[red]Selected host could not be resolved.[/]"
+                )
+                return
+            scan_target = selected_host.scan_target
+            target_label = _host_label(selected_host, _duplicate_ip_set(project))
             # Find the asset this host belongs to
-            for h in project.hosts:
-                if h.ip == host_ip:
-                    for a in project.assets:
-                        if a.asset_id in h.assets:
-                            asset = a
-                            break
+            for a in project.assets:
+                if a.asset_id in selected_host.assets:
+                    asset = a
                     break
             if not asset and project.assets:
                 asset = project.assets[0]
@@ -1240,9 +2010,9 @@ class ReconView(VerticalScroll):
 
                 from netpal.services.nmap.scanner import NmapScanner
                 from netpal.utils.scanning.scan_helpers import (
-                    execute_discovery_scan,
                     execute_recon_scan,
                     run_exploit_tools_on_hosts,
+                    run_discovery_phase,
                     scan_and_run_tools_on_discovered_hosts,
                     send_scan_notification,
                 )
@@ -1287,33 +2057,39 @@ class ReconView(VerticalScroll):
                 if "," in (scan_target or ""):
                     all_ips = [ip.strip() for ip in scan_target.split(",") if ip.strip()]
 
-                with _nmap_progress_stdin():
-                    if str(scan_type) == "nmap-discovery":
-                        hosts, error, _ = execute_discovery_scan(
-                            scanner, asset, project, config, speed=speed, callback=output_cb
-                        )
-                    elif all_ips:
-                        # Discovered-hosts path — delegates chunking + tools
-                        # to the shared helper used by the CLI.
-                        exploit_tools = ConfigLoader.load_exploit_tools()
-                        tool_runner = ToolRunner(project.project_id, config)
+                if ConfigLoader.is_discovery_scan(str(scan_type)):
+                    hosts = run_discovery_phase(
+                        scanner,
+                        asset,
+                        project,
+                        config,
+                        speed=speed,
+                        output_callback=output_cb,
+                        scan_type=str(scan_type),
+                    )
+                    error = None
+                elif all_ips:
+                    # Discovered-hosts path — delegates chunking + tools
+                    # to the shared helper used by the CLI.
+                    exploit_tools = ConfigLoader.load_exploit_tools()
+                    tool_runner = ToolRunner(project.project_id, config)
 
-                        hosts = scan_and_run_tools_on_discovered_hosts(
-                            scanner, tool_runner, all_ips,
-                            asset, project, str(scan_type), interface,
-                            exclude, exclude_ports, speed, skip_discovery,
-                            False, exploit_tools, output_cb,
-                            _save_proj, _save_find,
-                            rerun_autotools=rerun_autotools,
-                            custom_ports=custom_opts,
-                        )
-                        error = None  # errors handled inside helper
-                    else:
-                        hosts, error, _ = execute_recon_scan(
-                            scanner, asset, project, scan_target,
-                            interface, str(scan_type), custom_opts,
-                            speed, skip_discovery, False, exclude, exclude_ports, output_cb,
-                        )
+                    hosts = scan_and_run_tools_on_discovered_hosts(
+                        scanner, tool_runner, all_ips,
+                        asset, project, str(scan_type), interface,
+                        exclude, exclude_ports, speed, skip_discovery,
+                        False, exploit_tools, output_cb,
+                        _save_proj, _save_find,
+                        rerun_autotools=rerun_autotools,
+                        custom_ports=custom_opts,
+                    )
+                    error = None  # errors handled inside helper
+                else:
+                    hosts, error, _ = execute_recon_scan(
+                        scanner, asset, project, scan_target,
+                        interface, str(scan_type), custom_opts,
+                        speed, skip_discovery, False, exclude, exclude_ports, output_cb,
+                    )
 
                 # ── Post-scan handling for non-discovered targets ──────
                 if not all_ips:
@@ -1332,7 +2108,7 @@ class ReconView(VerticalScroll):
 
                         # Run auto-tools on hosts with services (recon scans only)
                         hosts_with_services = [h for h in hosts if h.services]
-                        if run_tools and hosts_with_services and str(scan_type) != "nmap-discovery":
+                        if run_tools and hosts_with_services and not ConfigLoader.is_discovery_scan(str(scan_type)):
                             self.app.call_from_thread(
                                 log.write,
                                 "\n[bold cyan]Running exploit tools on discovered services…[/]",
@@ -1404,11 +2180,10 @@ class ToolsView(VerticalScroll):
     DEFAULT_CLASSES = "compact-form"
 
     def compose(self) -> ComposeResult:
-        yield Static("[bold]Exploit Tools[/]", classes="section-title")
-        yield Static(
+        yield SectionIntro(
+            "Exploit Tools",
             "Run exploit tools against discovered hosts. Select a target, pick a tool, "
             "and optionally filter by port or service name.",
-            classes="info-text",
         )
 
         with Horizontal():
@@ -1442,7 +2217,7 @@ class ToolsView(VerticalScroll):
             yield Button("▶ Run Tool", id="btn-run-tool", variant="success")
 
         yield Static("", id="tools-status")
-        yield RichLog(id="tools-log", highlight=True, markup=True, min_width=80)
+        yield RichLog(id="tools-log", highlight=True, markup=True, min_width=80, wrap=True)
 
     def on_mount(self) -> None:
         self.refresh_view()
@@ -1462,6 +2237,7 @@ class ToolsView(VerticalScroll):
             return
 
         options: list[tuple[str, str]] = []
+        duplicate_ips = _duplicate_ip_set(project)
 
         # 1) All discovered hosts
         all_hosts = project.hosts
@@ -1483,15 +2259,13 @@ class ToolsView(VerticalScroll):
                 ))
 
         # 3) Individual hosts
-        for h in project.hosts:
+        for h in sorted(project.hosts, key=lambda host: (host.ip, getattr(host, "network_id", "unknown"))):
             svc_list = ", ".join(
                 f"{s.port}/{s.service_name or '?'}" for s in h.services
             )
-            label = f"🔹  {h.ip}"
-            if h.hostname:
-                label += f" ({h.hostname})"
+            label = f"🔹  {_host_label(h, duplicate_ips)}"
             label += f" — {svc_list}" if svc_list else " — no services"
-            options.append((label, f"host:{h.ip}"))
+            options.append((label, f"host-id:{h.host_id}"))
 
         if options:
             sel.set_options(options)
@@ -1575,17 +2349,18 @@ class ToolsView(VerticalScroll):
                     break
             if asset:
                 hosts = [h for h in project.hosts if asset.asset_id in h.assets]
-        elif target_val.startswith("host:"):
-            host_ip = target_val.split(":", 1)[1]
-            for h in project.hosts:
-                if h.ip == host_ip:
-                    hosts = [h]
-                    # Find asset for this host
-                    for a in project.assets:
-                        if a.asset_id in h.assets:
-                            asset = a
-                            break
-                    break
+        elif target_val.startswith("host-id:"):
+            host_id = target_val.split(":", 1)[1]
+            try:
+                selected_host = project.get_host(int(host_id))
+            except ValueError:
+                selected_host = None
+            if selected_host:
+                hosts = [selected_host]
+                for a in project.assets:
+                    if a.asset_id in selected_host.assets:
+                        asset = a
+                        break
 
         if not hosts:
             self.app.call_from_thread(status.update, "[red]No hosts found for target.[/]")
@@ -1678,6 +2453,8 @@ class ToolsView(VerticalScroll):
                         proxy = Host(
                             ip=h.ip, hostname=h.hostname,
                             os=h.os, host_id=h.host_id,
+                            metadata=dict(h.metadata),
+                            network_id=getattr(h, "network_id", "unknown"),
                         )
                         proxy.services = matched_services
                         proxy.findings = h.findings
@@ -1735,12 +2512,11 @@ class HostsView(VerticalScroll):
     """Discovered hosts with per-host service & evidence detail."""
 
     def compose(self) -> ComposeResult:
-        yield Static("[bold]Discovered Hosts[/]", classes="section-title")
-        yield Static(
+        yield SectionIntro(
+            "Discovered Hosts",
             "Click a host row to inspect its open ports and evidence.",
-            classes="info-text",
         )
-        yield DataTable(id="hosts-table")
+        yield SafeDataTable(id="hosts-table")
         yield Static("", id="hosts-detail-panel")
 
     def on_mount(self) -> None:
@@ -1750,11 +2526,12 @@ class HostsView(VerticalScroll):
         self._refresh_hosts_table()
 
     def _refresh_hosts_table(self) -> None:
-        table = _reset_table(self, "hosts-table", "IP", "Hostname", "OS", "Services", "Findings", "Tools", "Asset")
+        table = _reset_table(self, "hosts-table", "IP", "Network", "Hostname", "OS", "Services", "Findings", "Tools", "Asset")
         project = self.app.project
         if not project:
             return
-        for h in project.hosts:
+        duplicate_ips = _duplicate_ip_set(project)
+        for h in sorted(project.hosts, key=lambda host: (host.ip, getattr(host, "network_id", "unknown"))):
             asset_name = "—"
             for a in project.assets:
                 if a.asset_id in h.assets:
@@ -1766,41 +2543,43 @@ class HostsView(VerticalScroll):
             tool_count = sum(len(svc.proofs) for svc in h.services)
             table.add_row(
                 h.ip,
+                getattr(h, "network_id", "unknown") if h.ip in duplicate_ips else "—",
                 h.hostname or "—",
                 h.os or "—",
                 str(len(h.services)),
                 str(finding_count),
                 str(tool_count),
                 asset_name,
-                key=h.ip,
+                key=str(h.host_id),
             )
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         if event.row_key is None or event.row_key.value is None:
             return
-        host_ip = str(event.row_key.value)
-        self._show_host_detail(host_ip)
+        self._show_host_detail(str(event.row_key.value))
 
-    def _show_host_detail(self, host_ip: str) -> None:
+    def _show_host_detail(self, host_key: str) -> None:
         """Build a rich-text detail panel for the selected host."""
         project = self.app.project
         if not project:
             return
-        host = None
-        for h in project.hosts:
-            if h.ip == host_ip:
-                host = h
-                break
+        try:
+            host = project.get_host(int(host_key))
+        except ValueError:
+            host = None
         if not host:
             return
 
         panel = self.query_one("#hosts-detail-panel", Static)
         lines: list[str] = []
+        duplicate_ips = _duplicate_ip_set(project)
 
         lines.append(f"\n[bold cyan]━━━ Host: {host.ip}")
         if host.hostname:
             lines[-1] += f" ({host.hostname})"
         lines[-1] += " ━━━[/]"
+        if host.ip in duplicate_ips:
+            lines.append(f"  Network: {getattr(host, 'network_id', 'unknown')}")
         if host.os:
             lines.append(f"  OS: {host.os}")
 
@@ -1851,13 +2630,15 @@ class FindingsView(VerticalScroll):
     """Security findings list with click-to-expand detail (mirrors HostsView)."""
 
     def compose(self) -> ComposeResult:
-        yield Static("[bold]Security Findings[/]", classes="section-title")
-        yield Static(
+        yield SectionIntro(
+            "Security Findings",
             "Click a finding row to inspect its details below.",
-            classes="info-text",
         )
-        yield DataTable(id="findings-table")
+        with Horizontal(id="findings-action-bar"):
+            yield Button("➕ Create Finding", id="btn-create-finding", variant="success")
+        yield SafeDataTable(id="findings-table")
         yield Static("", id="finding-detail-panel")
+        yield Static("", id="findings-status")
 
     def on_mount(self) -> None:
         self.refresh_view()
@@ -1871,38 +2652,39 @@ class FindingsView(VerticalScroll):
             "Severity", "Name", "Host", "Port", "CWE",
         )
         project = self.app.project
+        create_btn = self.query_one("#btn-create-finding", Button)
+        create_btn.disabled = not bool(project and project.hosts)
         if not project:
             return
-        for idx, f in enumerate(project.findings):
+        duplicate_ips = _duplicate_ip_set(project)
+        for f in project.findings:
             host = project.get_host(f.host_id) if f.host_id else None
-            host_ip = host.ip if host else "—"
+            host_ip = _host_label(host, duplicate_ips) if host else "—"
             table.add_row(
                 f.severity or "—",
                 (f.name or "—")[:60],
                 host_ip,
                 str(f.port) if f.port else "—",
                 f.cwe or "—",
-                key=str(idx),
+                key=f.finding_id,
             )
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         if event.row_key is None or event.row_key.value is None:
             return
-        try:
-            idx = int(event.row_key.value)
-        except (ValueError, TypeError):
-            return
-        self._show_finding_detail(idx)
+        self._show_finding_detail(str(event.row_key.value))
 
-    def _show_finding_detail(self, idx: int) -> None:
+    def _show_finding_detail(self, finding_id: str) -> None:
         """Build a rich-text detail panel for the selected finding."""
         project = self.app.project
-        if not project or idx >= len(project.findings):
+        if not project:
             return
-        f = project.findings[idx]
+        f = next((finding for finding in project.findings if finding.finding_id == finding_id), None)
+        if not f:
+            return
 
         host = project.get_host(f.host_id) if f.host_id else None
-        host_ip = host.ip if host else "—"
+        host_ip = _host_label(host, _duplicate_ip_set(project)) if host else "—"
 
         panel = self.query_one("#finding-detail-panel", Static)
         lines: list[str] = []
@@ -1912,8 +2694,8 @@ class FindingsView(VerticalScroll):
             f"\n[bold cyan]━━━ Finding: [{sev_color}]{f.severity}[/] — {f.name} ━━━[/]"
         )
         lines.append(f"  Host: {host_ip}  |  Port: {f.port or '—'}  |  CWE: {f.cwe or '—'}")
-        if getattr(f, "cvss_score", None):
-            lines.append(f"  CVSS: {f.cvss_score}")
+        if getattr(f, "cvss", None) is not None:
+            lines.append(f"  CVSS: {f.cvss}")
 
         if getattr(f, "description", None):
             lines.append(f"\n  [bold]Description[/]")
@@ -1927,11 +2709,32 @@ class FindingsView(VerticalScroll):
             lines.append(f"\n  [bold]Remediation[/]")
             lines.append(f"  {f.remediation}")
 
-        if getattr(f, "evidence", None):
-            lines.append(f"\n  [bold]Evidence[/]")
-            lines.append(f"  {f.evidence}")
+        if getattr(f, "proof_file", None):
+            lines.append(f"\n  [bold]Proof Files[/]")
+            for proof_path in str(f.proof_file).split(","):
+                proof_path = proof_path.strip()
+                if proof_path:
+                    lines.append(f"  {proof_path}")
 
         panel.update("\n".join(lines))
+
+    @on(Button.Pressed, "#btn-create-finding")
+    def _handle_create(self, event: Button.Pressed) -> None:
+        project = self.app.project
+        if not project or not project.hosts:
+            self.query_one("#findings-status", Static).update(
+                "[yellow]Discovery data is required before creating a finding.[/]"
+            )
+            return
+        self.app.push_screen(CreateFindingScreen(project), self._on_create_dismissed)
+
+    def _on_create_dismissed(self, finding) -> None:
+        if finding is None:
+            return
+        self.query_one("#findings-status", Static).update(
+            f"[green]✔ Finding '{finding.name}' created successfully.[/]"
+        )
+        self.refresh_view()
 
 
 # ------------ AI ENHANCE VIEW (formerly Evidence) --------------------------
@@ -1940,10 +2743,9 @@ class EvidenceView(VerticalScroll):
     """AI Enhance — run AI reviewer and AI QA on findings."""
 
     def compose(self) -> ComposeResult:
-        yield Static("[bold]AI Enhance[/]", classes="section-title")
-        yield Static(
+        yield SectionIntro(
+            "AI Enhance",
             "Use AI to generate and improve security findings from scan evidence.",
-            classes="info-text",
         )
         yield Static("", id="evidence-status")
 
@@ -1960,7 +2762,7 @@ class EvidenceView(VerticalScroll):
                 id="btn-ai-enhance", variant="warning",
             )
         yield RichLog(
-            id="evidence-log", highlight=True, markup=True, min_width=80
+            id="evidence-log", highlight=True, markup=True, min_width=80, wrap=True
         )
 
     def on_mount(self) -> None:
@@ -2223,18 +3025,524 @@ class EvidenceView(VerticalScroll):
                 )
 
 
+AD_OUTPUT_TYPES = [
+    ("All Types", "all"),
+    ("Users", "users"),
+    ("Computers", "computers"),
+    ("Groups", "groups"),
+    ("Domains", "domains"),
+    ("OUs", "ous"),
+    ("GPOs", "gpos"),
+    ("Containers", "containers"),
+]
+
+
+class ADScanView(VerticalScroll):
+    """Configure and run local Active Directory LDAP scans."""
+
+    DEFAULT_CLASSES = "compact-form"
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self._scan_running = False
+
+    def compose(self) -> ComposeResult:
+        yield SectionIntro(
+            "AD Scan",
+            "Collect local LDAP data and BloodHound JSON for the active project's domain controller.",
+        )
+        with Horizontal():
+            with Vertical():
+                yield Label("Domain")
+                yield Input(id="ad-domain", placeholder="e.g. CORP.LOCAL")
+            with Vertical():
+                yield Label("DC IP / Hostname")
+                yield Input(id="ad-dc-ip", placeholder="e.g. 10.0.0.1")
+        with Horizontal():
+            with Vertical():
+                yield Label("Username")
+                yield Input(id="ad-username", placeholder=r"DOMAIN\user or user@domain")
+            with Vertical():
+                yield Label("Password")
+                yield Input(id="ad-password", placeholder="Password", password=True)
+        with Horizontal():
+            with Vertical():
+                yield Label("NTLM Hashes")
+                yield Input(id="ad-hashes", placeholder="LM:NT or :NT")
+            with Vertical():
+                yield Label("AES Key")
+                yield Input(id="ad-aes-key", placeholder="Optional Kerberos AES key")
+        with Horizontal():
+            with Vertical():
+                yield Label("Auth Type")
+                yield Select(
+                    [("NTLM", "ntlm"), ("Kerberos", "kerberos"), ("Anonymous", "anonymous")],
+                    id="ad-auth-type",
+                    value="ntlm",
+                )
+            with Vertical():
+                yield Label("Use LDAPS")
+                yield Select([("No", False), ("Yes", True)], id="ad-use-ssl", value=False)
+            with Vertical():
+                yield Label("Output Types")
+                yield Select(AD_OUTPUT_TYPES, id="ad-output-types", value="all")
+            with Vertical():
+                yield Label("Skip ACLs")
+                yield Select([("No", False), ("Yes", True)], id="ad-no-sd", value=False)
+        with Horizontal():
+            with Vertical():
+                yield Label("Throttle")
+                yield Input(id="ad-throttle", placeholder="0.0")
+            with Vertical():
+                yield Label("Page Size")
+                yield Input(id="ad-page-size", placeholder="500")
+            with Vertical():
+                yield Label("Custom LDAP Filter")
+                yield Input(id="ad-ldap-filter", placeholder="Optional custom query filter")
+        with Horizontal():
+            yield Button("▶ Run AD Scan", id="btn-run-ad", variant="success")
+        yield Static("", id="ad-status")
+        yield RichLog(id="ad-log", highlight=True, markup=True, min_width=80, wrap=True)
+
+    def on_mount(self) -> None:
+        self.refresh_view()
+
+    def refresh_view(self) -> None:
+        project = self.app.project
+        if not project:
+            return
+        domain_input = self.query_one("#ad-domain", Input)
+        dc_input = self.query_one("#ad-dc-ip", Input)
+        if not domain_input.value:
+            domain_input.value = getattr(project, "ad_domain", "") or ""
+        if not dc_input.value:
+            dc_input.value = getattr(project, "ad_dc_ip", "") or ""
+
+    @on(Button.Pressed, "#btn-run-ad")
+    def _handle_run(self, event: Button.Pressed) -> None:
+        if not self._scan_running:
+            self._start_ad_scan()
+
+    @work(thread=True, exclusive=True, group="ad_scan")
+    def _start_ad_scan(self) -> None:
+        project = self.app.project
+        log = self.query_one("#ad-log", RichLog)
+        status = self.query_one("#ad-status", Static)
+        btn = self.query_one("#btn-run-ad", Button)
+
+        if not project:
+            self.app.call_from_thread(status.update, "[red]No active project.[/]")
+            return
+
+        domain = self.query_one("#ad-domain", Input).value.strip()
+        dc_ip = self.query_one("#ad-dc-ip", Input).value.strip()
+        if not domain or not dc_ip:
+            self.app.call_from_thread(
+                status.update,
+                "[red]Domain and DC IP are required.[/]",
+            )
+            return
+
+        username = self.query_one("#ad-username", Input).value.strip()
+        password = self.query_one("#ad-password", Input).value.strip()
+        hashes = self.query_one("#ad-hashes", Input).value.strip()
+        aes_key = self.query_one("#ad-aes-key", Input).value.strip()
+        auth_type_val = self.query_one("#ad-auth-type", Select).value
+        auth_type = str(auth_type_val) if auth_type_val is not Select.BLANK else "ntlm"
+        use_ssl_val = self.query_one("#ad-use-ssl", Select).value
+        use_ssl = bool(use_ssl_val) if use_ssl_val is not Select.BLANK else False
+        output_types_val = self.query_one("#ad-output-types", Select).value
+        output_types_raw = str(output_types_val) if output_types_val is not Select.BLANK else "all"
+        no_sd_val = self.query_one("#ad-no-sd", Select).value
+        no_sd = bool(no_sd_val) if no_sd_val is not Select.BLANK else False
+        throttle_raw = self.query_one("#ad-throttle", Input).value.strip()
+        page_size_raw = self.query_one("#ad-page-size", Input).value.strip()
+        ldap_filter = self.query_one("#ad-ldap-filter", Input).value.strip()
+
+        try:
+            throttle = float(throttle_raw) if throttle_raw else 0.0
+        except ValueError:
+            throttle = 0.0
+        try:
+            page_size = int(page_size_raw) if page_size_raw else 500
+        except ValueError:
+            page_size = 500
+
+        self._scan_running = True
+        with _busy_button(self.app, btn, "Scanning…"):
+            self.app.call_from_thread(log.clear)
+            self.app.call_from_thread(status.update, "")
+            self.app.call_from_thread(
+                log.write,
+                f"[bold yellow]Connecting to {dc_ip} ({domain.upper()})…[/]",
+            )
+
+            try:
+                from ldap3 import SUBTREE
+                from netpal.services.ad.collector import ADCollector
+                from netpal.services.ad.ldap_client import LDAPClient
+                from netpal.utils.persistence.project_paths import ProjectPaths
+
+                output_types = None if output_types_raw == "all" else [value.strip() for value in output_types_raw.split(",") if value.strip()]
+                is_kerberos = auth_type == "kerberos"
+                is_anonymous = auth_type == "anonymous"
+
+                client = LDAPClient(
+                    dc_ip=dc_ip,
+                    domain=domain.upper(),
+                    username="" if is_anonymous else username,
+                    password="" if is_anonymous else password,
+                    hashes=hashes,
+                    aes_key=aes_key,
+                    use_ssl=use_ssl,
+                    use_kerberos=is_kerberos,
+                    throttle=throttle,
+                    page_size=page_size,
+                )
+                if not client.connect():
+                    self.app.call_from_thread(log.write, f"[bold red]Failed to connect to {dc_ip}[/]")
+                    return
+
+                try:
+                    project.ad_domain = domain
+                    project.ad_dc_ip = dc_ip
+                    project.save_to_file()
+
+                    paths = ProjectPaths(project.project_id)
+                    output_dir = os.path.join(paths.get_project_directory(), "ad_scan")
+                    collector = ADCollector(client, domain=domain.upper())
+
+                    if ldap_filter:
+                        self.app.call_from_thread(
+                            log.write,
+                            f"[cyan]Running custom LDAP query: {ldap_filter}[/]",
+                        )
+                        results = collector.collect_custom_query(
+                            ldap_filter=ldap_filter,
+                            scope=SUBTREE,
+                        )
+                        queries_dir = os.path.join(output_dir, "ad_queries")
+                        os.makedirs(queries_dir, exist_ok=True)
+                        query_path = os.path.join(queries_dir, "query_latest.json")
+                        with open(query_path, "w", encoding="utf-8") as handle:
+                            json.dump({"filter": ldap_filter, "results": results}, handle, indent=2, default=str)
+                        self.app.call_from_thread(log.write, f"[bold green]✔ Saved {len(results)} query results[/]")
+                        self.app.call_from_thread(log.write, f"[dim]{query_path}[/]")
+                        return
+
+                    def progress(message: str) -> None:
+                        self.app.call_from_thread(log.write, f"[yellow]{message}[/]")
+
+                    summary = collector.collect_all(
+                        output_dir=output_dir,
+                        output_types=output_types,
+                        no_sd=no_sd,
+                        progress_callback=progress,
+                    )
+                    counts = summary.get("counts", {})
+                    self.app.call_from_thread(log.write, "\n[bold green]AD collection complete[/]")
+                    for object_type, count in counts.items():
+                        self.app.call_from_thread(log.write, f"  [cyan]{object_type:<15}[/] {count:>6} objects")
+                    files = summary.get("files", {})
+                    if files:
+                        self.app.call_from_thread(log.write, "\n[yellow]Output files:[/]")
+                        for filepath in files.values():
+                            self.app.call_from_thread(log.write, f"  [dim]{filepath}[/]")
+                finally:
+                    client.disconnect()
+
+                self.app.call_from_thread(self.app.__setattr__, "project", project)
+            except Exception as exc:
+                self.app.call_from_thread(log.write, f"[bold red]Error: {exc}[/]")
+            finally:
+                self._scan_running = False
+
+
+def _get_testcase_manager():
+    """Lazy testcase manager loader."""
+    from netpal.services.testcase.manager import TestCaseManager
+
+    return TestCaseManager(_load_config())
+
+
+class EditTestCaseScreen(ModalScreen):
+    """Modal editor for a single test case result."""
+
+    DEFAULT_CSS = """
+    EditTestCaseScreen {
+        align: center middle;
+    }
+    .tc-edit-form {
+        width: 70;
+        height: auto;
+        max-height: 85%;
+        border: thick $primary;
+        padding: 1 2;
+        background: $surface;
+    }
+    .tc-edit-form Select {
+        margin: 0;
+        height: 3;
+    }
+    #tc-edit-notes {
+        height: 6;
+    }
+    """
+
+    def __init__(self, project_id: str, entry: dict) -> None:
+        super().__init__()
+        self._project_id = project_id
+        self._entry = entry
+
+    def compose(self) -> ComposeResult:
+        with VerticalScroll(classes="tc-edit-form"):
+            yield Static(f"[bold]Edit Test Case[/] {self._entry.get('test_name', '')}", classes="section-title")
+            yield Label("Status")
+            yield Select(
+                [("Passed", "passed"), ("Failed", "failed"), ("Needs Input", "needs_input")],
+                id="tc-edit-status",
+                value=self._entry.get("status", "needs_input"),
+            )
+            yield Label("Notes")
+            yield TextArea(id="tc-edit-notes")
+            yield Static("", id="tc-edit-status-msg")
+            with Horizontal(classes="modal-buttons"):
+                yield Button("Save", id="btn-tc-edit-save", variant="success")
+                yield Button("Cancel", id="btn-tc-edit-cancel", variant="default")
+
+    def on_mount(self) -> None:
+        self.query_one("#tc-edit-notes", TextArea).load_text(self._entry.get("notes", ""))
+
+    @on(Button.Pressed, "#btn-tc-edit-save")
+    def _handle_save(self, event: Button.Pressed) -> None:
+        status_value = self.query_one("#tc-edit-status", Select).value
+        if status_value is Select.BLANK:
+            self.query_one("#tc-edit-status-msg", Static).update("[red]Select a status.[/]")
+            return
+        notes = self.query_one("#tc-edit-notes", TextArea).text
+        result = _get_testcase_manager().set_result(
+            self._project_id,
+            self._entry.get("test_case_id", ""),
+            str(status_value),
+            notes,
+        )
+        if result.get("error"):
+            self.query_one("#tc-edit-status-msg", Static).update(f"[red]{result['error']}[/]")
+            return
+        self.dismiss(True)
+
+    @on(Button.Pressed, "#btn-tc-edit-cancel")
+    def _handle_cancel(self, event: Button.Pressed) -> None:
+        self.dismiss(False)
+
+
+class TestCasesView(VerticalScroll):
+    """View and manage local testcase registries."""
+
+    def compose(self) -> ComposeResult:
+        yield Static("[bold]Test Cases[/]", classes="section-title")
+        yield Static("", id="tc-summary")
+        yield Static("", id="tc-info-msg", classes="info-text")
+        with Horizontal():
+            yield Label("Category Filter")
+            yield Select([("All Categories", "")], id="tc-casetype-filter", value="")
+            yield Label("Status Filter")
+            yield Select(
+                [
+                    ("All Statuses", ""),
+                    ("Passed", "passed"),
+                    ("Failed", "failed"),
+                    ("Needs Input", "needs_input"),
+                ],
+                id="tc-status-filter",
+                value="",
+            )
+        yield SafeDataTable(id="tc-table")
+        yield Static("", id="tc-detail-panel")
+        with Horizontal():
+            yield Button("✏ Edit Test Case", id="btn-tc-edit", variant="primary", disabled=True)
+            yield Button("↻ Refresh", id="btn-tc-refresh", variant="default")
+        yield Static("", id="tc-status-msg")
+        yield SectionIntro(
+            "CSV Import",
+            "Import test cases directly from a CSV file. CSV is the only supported testcase source in local-only mode.",
+        )
+        with Horizontal():
+            yield Input(id="tc-csv-path", placeholder="Path to testcase CSV")
+            yield Button("Load CSV", id="btn-tc-load-csv", variant="success")
+
+    def on_mount(self) -> None:
+        self._selected_tc_id = ""
+        self.refresh_view()
+
+    def refresh_view(self) -> None:
+        project = self.app.project
+        info_msg = self.query_one("#tc-info-msg", Static)
+        summary_label = self.query_one("#tc-summary", Static)
+        edit_btn = self.query_one("#btn-tc-edit", Button)
+        edit_btn.disabled = True
+        self._selected_tc_id = ""
+
+        if not project:
+            info_msg.update("[yellow]No active project.[/]")
+            summary_label.update("")
+            self._clear_table()
+            self.query_one("#tc-detail-panel", Static).update("")
+            return
+
+        registry = _get_testcase_manager().get_registry(project.project_id)
+        if not registry.test_cases:
+            info_msg.update(
+                "[yellow]No test cases loaded. Import a CSV below or use `netpal testcase --load --csv-path ...`.[/]"
+            )
+            summary_label.update("")
+            self._clear_table()
+            return
+
+        info_msg.update("")
+        summary = registry.summary()
+        summary_label.update(
+            f"[green]Passed: {summary['passed']}[/]  |  "
+            f"[red]Failed: {summary['failed']}[/]  |  "
+            f"[yellow]Needs Input: {summary['needs_input']}[/]  |  "
+            f"Total: {summary['total']}"
+        )
+        self._populate_filter(registry)
+        current_filter = self.query_one("#tc-casetype-filter", Select).value
+        category_filter = "" if current_filter is Select.BLANK else str(current_filter)
+        current_status = self.query_one("#tc-status-filter", Select).value
+        status_filter = "" if current_status is Select.BLANK else str(current_status)
+        self._populate_table(registry, category_filter=category_filter, status_filter=status_filter)
+
+    def _clear_table(self) -> None:
+        self.query_one("#tc-table", DataTable).clear(columns=True)
+
+    def _populate_filter(self, registry) -> None:
+        categories = sorted({
+            entry.get("category", "")
+            for entry in registry.test_cases.values()
+            if entry.get("category", "")
+        })
+        select = self.query_one("#tc-casetype-filter", Select)
+        current = select.value if select.value is not Select.BLANK else ""
+        select.set_options([("All Categories", "")] + [(category, category) for category in categories])
+        if current and current in categories:
+            select.value = current
+        else:
+            select.value = ""
+
+    def _populate_table(self, registry, category_filter: str = "", status_filter: str = "") -> None:
+        table = _reset_table(self, "tc-table", "ID", "Test Name", "Phase", "Category", "Status", "Notes")
+        entries = list(registry.test_cases.values())
+        if category_filter:
+            entries = [entry for entry in entries if entry.get("category", "") == category_filter]
+        if status_filter:
+            entries = [entry for entry in entries if entry.get("status", "needs_input") == status_filter]
+        for entry in entries:
+            table.add_row(
+                entry.get("test_case_id", "")[:12],
+                (entry.get("test_name", "") or "—")[:50],
+                entry.get("phase", "") or "—",
+                entry.get("category", "") or "—",
+                entry.get("status", "needs_input"),
+                (entry.get("notes", "") or "")[:30],
+                key=entry.get("test_case_id", ""),
+            )
+
+    @on(Select.Changed, "#tc-casetype-filter")
+    def _handle_filter_change(self, event: Select.Changed) -> None:
+        self._apply_filters()
+
+    @on(Select.Changed, "#tc-status-filter")
+    def _handle_status_filter_change(self, event: Select.Changed) -> None:
+        self._apply_filters()
+
+    def _apply_filters(self) -> None:
+        project = self.app.project
+        if not project:
+            return
+        registry = _get_testcase_manager().get_registry(project.project_id)
+        category_value = self.query_one("#tc-casetype-filter", Select).value
+        status_value = self.query_one("#tc-status-filter", Select).value
+        category_filter = "" if category_value is Select.BLANK else str(category_value)
+        status_filter = "" if status_value is Select.BLANK else str(status_value)
+        self._populate_table(registry, category_filter=category_filter, status_filter=status_filter)
+
+    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
+        if event.row_key is None or event.row_key.value is None:
+            return
+        self._selected_tc_id = str(event.row_key.value)
+        self.query_one("#btn-tc-edit", Button).disabled = False
+        self._show_detail(self._selected_tc_id)
+
+    def _show_detail(self, test_case_id: str) -> None:
+        project = self.app.project
+        if not project:
+            return
+        registry = _get_testcase_manager().get_registry(project.project_id)
+        entry = registry.test_cases.get(test_case_id)
+        if not entry:
+            return
+        lines = [
+            f"\n[bold cyan]━━━ Test Case: {entry.get('test_name', '')} ━━━[/]",
+            f"  ID: {entry.get('test_case_id', '')}",
+            f"  Phase: {entry.get('phase', '') or '—'}  |  Category: {entry.get('category', '') or '—'}",
+            f"  Status: {entry.get('status', 'needs_input')}",
+        ]
+        if entry.get("description"):
+            lines.append(f"\n  [bold]Description[/]\n  {entry['description']}")
+        if entry.get("requirement"):
+            lines.append(f"\n  [bold]Requirement[/]\n  {entry['requirement']}")
+        if entry.get("notes"):
+            lines.append(f"\n  [bold]Notes[/]\n  {entry['notes']}")
+        self.query_one("#tc-detail-panel", Static).update("\n".join(lines))
+
+    @on(Button.Pressed, "#btn-tc-edit")
+    def _handle_edit(self, event: Button.Pressed) -> None:
+        project = self.app.project
+        if not project or not self._selected_tc_id:
+            return
+        registry = _get_testcase_manager().get_registry(project.project_id)
+        entry = registry.test_cases.get(self._selected_tc_id)
+        if not entry:
+            return
+        self.app.push_screen(
+            EditTestCaseScreen(project.project_id, entry),
+            lambda saved: self.refresh_view() if saved else None,
+        )
+
+    @on(Button.Pressed, "#btn-tc-refresh")
+    def _handle_refresh(self, event: Button.Pressed) -> None:
+        self.refresh_view()
+
+    @on(Button.Pressed, "#btn-tc-load-csv")
+    def _handle_load_csv(self, event: Button.Pressed) -> None:
+        project = self.app.project
+        if not project:
+            return
+        csv_path = self.query_one("#tc-csv-path", Input).value.strip()
+        if not csv_path:
+            self.query_one("#tc-status-msg", Static).update("[yellow]Enter a CSV path first.[/]")
+            return
+        result = _get_testcase_manager().load_test_cases(project, csv_path=csv_path)
+        if result.get("error"):
+            self.query_one("#tc-status-msg", Static).update(f"[red]{result['error']}[/]")
+            return
+        self.query_one("#tc-status-msg", Static).update(
+            f"[green]Loaded {result.get('total', 0)} test cases from CSV.[/]"
+        )
+        self.refresh_view()
+
+
 # ------------ SETTINGS VIEW ------------------------------------------------
 
 class SettingsView(VerticalScroll):
     """JSON config editor."""
 
     def compose(self) -> ComposeResult:
-        yield Static(
-            "[bold]Settings — config.json Editor[/]", classes="section-title"
-        )
-        yield Static(
+        yield SectionIntro(
+            "Settings - config.json Editor",
             "Edit configuration values below. Press Save to validate and persist.",
-            classes="info-text",
         )
         yield TextArea(id="settings-editor", language="json")
         yield Static("", id="settings-status")
@@ -2296,15 +3604,17 @@ class NetPalApp(App):
     CSS = APP_CSS
 
     BINDINGS = [
-        Binding("1", "goto('view-projects')", "Projects", show=True),
-        Binding("2", "goto('view-assets')", "Assets", show=True),
-        Binding("3", "goto('view-recon')", "Recon", show=True),
-        Binding("4", "goto('view-tools')", "Tools", show=True),
-        Binding("5", "goto('view-hosts')", "Hosts", show=True),
-        Binding("6", "goto('view-findings')", "Findings", show=True),
-        Binding("7", "goto('view-evidence')", "AI Enhance", show=True),
-        Binding("8", "goto('view-settings')", "Settings", show=True),
-        Binding("q", "quit", "Quit", show=True),
+        Binding("ctrl+1", "goto('view-projects')", "Projects", show=True, key_display="^1"),
+        Binding("ctrl+2", "goto('view-assets')", "Assets", show=True, key_display="^2"),
+        Binding("ctrl+3", "goto('view-recon')", "Recon", show=True, key_display="^3"),
+        Binding("ctrl+4", "goto('view-tools')", "Tools", show=True, key_display="^4"),
+        Binding("ctrl+5", "goto('view-hosts')", "Hosts", show=True, key_display="^5"),
+        Binding("ctrl+6", "goto('view-findings')", "Findings", show=True, key_display="^6"),
+        Binding("ctrl+7", "goto('view-evidence')", "AI Enhance", show=True, key_display="^7"),
+        Binding("ctrl+8", "goto('view-ad-scan')", "AD Scan", show=True, key_display="^8"),
+        Binding("ctrl+9", "goto('view-testcases')", "Test Cases", show=True, key_display="^9"),
+        Binding("ctrl+0", "goto('view-settings')", "Settings", show=True, key_display="^0"),
+        Binding("ctrl+q", "quit", "Quit", show=True, key_display="^q"),
     ]
 
     # Reactive state — assigning triggers watch_ methods
@@ -2334,6 +3644,10 @@ class NetPalApp(App):
                 yield FindingsView()
             with VerticalScroll(id=VIEW_EVIDENCE, classes="view-container"):
                 yield EvidenceView()
+            with VerticalScroll(id=VIEW_AD_SCAN, classes="view-container"):
+                yield ADScanView()
+            with VerticalScroll(id=VIEW_TESTCASES, classes="view-container"):
+                yield TestCasesView()
             with VerticalScroll(id=VIEW_SETTINGS, classes="view-container"):
                 yield SettingsView()
         yield Footer()
@@ -2375,6 +3689,10 @@ class NetPalApp(App):
         p = self.project
         if p is not None:
             allowed.add(VIEW_ASSETS)
+            allowed.add(VIEW_FINDINGS)
+            allowed.add(VIEW_TESTCASES)
+            if p.ad_domain and p.ad_dc_ip:
+                allowed.add(VIEW_AD_SCAN)
             if p.assets:
                 allowed.add(VIEW_RECON)
                 if p.hosts:
@@ -2385,8 +3703,6 @@ class NetPalApp(App):
                     if has_services:
                         allowed.add(VIEW_TOOLS)
                         allowed.add(VIEW_EVIDENCE)
-                    if p.findings:
-                        allowed.add(VIEW_FINDINGS)
         return allowed
 
     def _update_nav_state(self) -> None:
@@ -2439,6 +3755,8 @@ class NetPalApp(App):
             VIEW_HOSTS: HostsView,
             VIEW_FINDINGS: FindingsView,
             VIEW_EVIDENCE: EvidenceView,
+            VIEW_AD_SCAN: ADScanView,
+            VIEW_TESTCASES: TestCasesView,
             VIEW_SETTINGS: SettingsView,
         }
         cls = view_map.get(view_id)
@@ -2461,6 +3779,11 @@ class NetPalApp(App):
 
 def run_interactive() -> int:
     """Launch the NetPal interactive TUI.  Returns exit code."""
+    from netpal.utils.tool_paths import check_tools
+
+    if not check_tools():
+        return 1
+
     app = NetPalApp()
     app.run()
     return 0

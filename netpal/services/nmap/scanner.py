@@ -147,7 +147,8 @@ class NmapScanner:
         callback: Optional[Callable] = None,
         speed: Optional[int] = None,
         skip_discovery: bool = False,
-        verbose: bool = False
+        verbose: bool = False,
+        network_id: str = "unknown",
     ) -> Tuple[List, Optional[str]]:
         """
         Scan a network with automatic /24 chunking for large networks.
@@ -196,7 +197,7 @@ class NmapScanner:
             if callback:
                 callback(f"\n[SCAN] {cmd_str}\n")
             
-            hosts, error = self._execute_scan(cmd, output_file, callback)
+            hosts, error = self._execute_scan(cmd, output_file, callback, network_id=network_id)
             
             if hosts:
                 all_hosts.extend(hosts)
@@ -220,7 +221,8 @@ class NmapScanner:
         file_path: Optional[str] = None,
         speed: Optional[int] = None,
         skip_discovery: bool = False,
-        verbose: bool = False
+        verbose: bool = False,
+        network_id: str = "unknown",
     ) -> Tuple[List, Optional[str]]:
         """
         Scan a list of hosts with automatic chunking for large lists.
@@ -262,7 +264,7 @@ class NmapScanner:
             if callback:
                 callback(f"\n[SCAN] {cmd_str}\n")
             
-            return self._execute_scan(cmd, output_file, callback)
+            return self._execute_scan(cmd, output_file, callback, network_id=network_id)
         
         # Handle large lists with chunking
         chunk_size = 100
@@ -299,7 +301,7 @@ class NmapScanner:
                     if callback:
                         callback(f"\n[SCAN CHUNK {idx+1}/{len(chunks)}] {cmd_str}\n")
                     
-                    hosts, error = self._execute_scan(cmd, output_file, callback)
+                    hosts, error = self._execute_scan(cmd, output_file, callback, network_id=network_id)
                     
                     if hosts:
                         all_hosts.extend(hosts)
@@ -338,7 +340,7 @@ class NmapScanner:
                 if callback:
                     callback(f"\n[SCAN] {cmd_str}\n")
                 
-                return self._execute_scan(cmd, output_file, callback)
+                return self._execute_scan(cmd, output_file, callback, network_id=network_id)
             finally:
                 # Cleanup temp file
                 try:
@@ -359,7 +361,8 @@ class NmapScanner:
         custom_ports: Optional[str] = None,
         speed: Optional[int] = None,
         skip_discovery: bool = False,
-        verbose: bool = False
+        verbose: bool = False,
+        network_id: str = "unknown",
     ) -> Tuple[List, Optional[str]]:
         """
         Scan a single IP or hostname.
@@ -397,13 +400,14 @@ class NmapScanner:
         if callback:
             callback(f"\n[SCAN] {cmd_str}\n")
         
-        return self._execute_scan(cmd, output_file, callback)
+        return self._execute_scan(cmd, output_file, callback, network_id=network_id)
     
     def _execute_scan(
         self,
         cmd: List[str],
         output_file: Optional[str],
-        callback: Optional[Callable] = None
+        callback: Optional[Callable] = None,
+        network_id: str = "unknown",
     ) -> Tuple[List, Optional[str]]:
         """
         Execute nmap command and parse results.
@@ -469,7 +473,7 @@ class NmapScanner:
             
             # Parse results if output XML exists
             if output_file and os.path.exists(output_file):
-                hosts = NmapXmlParser.parse_xml_file(output_file)
+                hosts = NmapXmlParser.parse_xml_file(output_file, network_id=network_id)
                 if hosts:
                     if return_code != 0:
                         if callback:

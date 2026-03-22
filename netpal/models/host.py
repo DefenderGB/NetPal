@@ -11,12 +11,13 @@ class Host:
     """
     
     def __init__(self, ip, hostname="", os="", host_id=None,
-                 services=None, findings=None, assets=None, metadata=None):
+                 services=None, findings=None, assets=None, metadata=None,
+                 network_id="unknown"):
         """
         Initialize a Host.
         
         Args:
-            ip: IP address (required, unique identifier)
+            ip: IP address (required)
             hostname: Hostname/domain name
             os: Operating system detection
             host_id: Unique host ID (generated if not provided)
@@ -24,6 +25,7 @@ class Host:
             findings: List of finding IDs associated with this host
             assets: List of asset IDs this host belongs to
             metadata: Arbitrary key-value metadata dict (e.g. vlan, impact)
+            network_id: Network context identifier
         """
         self.ip = ip
         self.hostname = hostname
@@ -33,6 +35,7 @@ class Host:
         self.findings = findings if findings is not None else []
         self.assets = assets if assets is not None else []
         self.metadata = metadata if metadata is not None else {}
+        self.network_id = network_id or "unknown"
     
     def add_service(self, service: Service):
         """
@@ -81,6 +84,16 @@ class Host:
         """
         if finding_id not in self.findings:
             self.findings.append(finding_id)
+
+    @property
+    def identity_key(self) -> tuple[str, str]:
+        """Composite identity key for deduplication."""
+        return (self.ip, self.network_id or "unknown")
+
+    @property
+    def scan_target(self) -> str:
+        """Preferred scan target for nmap rescans."""
+        return self.hostname if self.hostname else self.ip
     
     def to_dict(self):
         """Serialize to dictionary"""
@@ -93,6 +106,7 @@ class Host:
             "services": [svc.to_dict() for svc in self.services],
             "findings": self.findings,
             "metadata": self.metadata,
+            "network_id": self.network_id,
         }
     
     @classmethod
@@ -109,4 +123,5 @@ class Host:
             findings=data.get("findings", []),
             assets=data.get("assets", []),
             metadata=data.get("metadata", {}),
+            network_id=data.get("network_id", "unknown"),
         )

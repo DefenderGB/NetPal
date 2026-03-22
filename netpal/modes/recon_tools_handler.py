@@ -23,6 +23,7 @@ class ReconToolsHandler(ModeHandler):
         self._target_name = getattr(args, 'target', None)
         self._list_tools = getattr(args, 'list_tools', False)
         self._host_filter = getattr(args, 'host', None)
+        self._network_id_filter = getattr(args, 'network_id', None)
         self._port_filter = getattr(args, 'port', None)
         self._tool_filter = getattr(args, 'tool', None)
         self._hosts_to_process = []
@@ -41,6 +42,8 @@ class ReconToolsHandler(ModeHandler):
             print(f"\n{Fore.CYAN}  ▸ Recon Tools — Available Targets{Style.RESET_ALL}\n")
 
     def validate_prerequisites(self) -> bool:
+        from ..utils.tool_paths import check_tools
+
         # --list doesn't need a project
         if self._list_tools:
             return True
@@ -53,6 +56,9 @@ class ReconToolsHandler(ModeHandler):
             print(f"{Fore.YELLOW}No discovered hosts in this project.{Style.RESET_ALL}")
             print(f"{Fore.YELLOW}Run discovery first:{Style.RESET_ALL}")
             print(f"  {Fore.GREEN}netpal recon --asset <ASSET> --type nmap-discovery{Style.RESET_ALL}")
+            return False
+
+        if not check_tools():
             return False
 
         return True
@@ -171,7 +177,14 @@ class ReconToolsHandler(ModeHandler):
             for h in hosts_with_services:
                 svc = h.get_service(port_filter)
                 if svc:
-                    proxy = Host(ip=h.ip, hostname=h.hostname, os=h.os, host_id=h.host_id)
+                    proxy = Host(
+                        ip=h.ip,
+                        hostname=h.hostname,
+                        os=h.os,
+                        host_id=h.host_id,
+                        network_id=h.network_id,
+                        metadata=dict(h.metadata or {}),
+                    )
                     proxy.services = [svc]
                     proxy.findings = h.findings
                     proxy.assets = h.assets
@@ -207,16 +220,40 @@ class ReconToolsHandler(ModeHandler):
     def _prepare_targeted_context(self):
         """Prepare context for --host (optionally with --port and --tool)."""
         host_ip = self._host_filter
+        network_id_filter = self._network_id_filter
         port_filter = self._port_filter
         tool_filter = self._tool_filter
 
         # Find the host in the project
-        host = self.project.get_host_by_ip(host_ip)
+        hostname_matches = [h for h in self.project.hosts if h.hostname and h.hostname == host_ip]
+        ip_matches = self.project.get_hosts_by_ip(host_ip)
+
+        host = None
+        if network_id_filter:
+            host = self.project.get_host_by_identity(host_ip, network_id_filter)
+            if not host and len(hostname_matches) == 1:
+                host = hostname_matches[0]
+        elif len(ip_matches) == 1:
+            host = ip_matches[0]
+        elif len(ip_matches) > 1:
+            print(f"{Fore.RED}[ERROR] Multiple discovered hosts share IP '{host_ip}'.{Style.RESET_ALL}")
+            print(f"{Fore.YELLOW}Re-run with --network-id using one of:{Style.RESET_ALL}")
+            for match in ip_matches:
+                hostname_suffix = f" ({match.hostname})" if match.hostname else ""
+                print(f"  {match.network_id}{hostname_suffix}")
+            return None
+        elif len(hostname_matches) == 1:
+            host = hostname_matches[0]
+
         if not host:
-            print(f"{Fore.RED}[ERROR] Host '{host_ip}' not found in project.{Style.RESET_ALL}")
+            if network_id_filter:
+                print(f"{Fore.RED}[ERROR] Host '{host_ip}' with network_id '{network_id_filter}' not found in project.{Style.RESET_ALL}")
+            else:
+                print(f"{Fore.RED}[ERROR] Host '{host_ip}' not found in project.{Style.RESET_ALL}")
             print(f"{Fore.YELLOW}Discovered hosts:{Style.RESET_ALL}")
             for h in self.project.hosts:
-                print(f"  {h.ip}")
+                suffix = f" [{h.network_id}]" if len(self.project.get_hosts_by_ip(h.ip)) > 1 else ""
+                print(f"  {h.ip}{suffix}")
             return None
 
         if not host.services:

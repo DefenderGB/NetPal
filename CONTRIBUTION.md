@@ -2,6 +2,11 @@
 
 This guide covers the project structure and how to extend NetPal.
 
+NetPal is local-only in this repo:
+
+- Do add local project, AD, testcase, TUI, MCP, and evidence features.
+- Do not add `upload`, `pull`, `push`, cloud sync, S3 storage, or internal-only/Midway flows back into the codebase.
+
 ## Contact
 
 **Developer**: defender-gb@protonmail.com
@@ -10,7 +15,7 @@ This guide covers the project structure and how to extend NetPal.
 
 ### Quick Start (recommended)
 
-The [`install.sh`](install.sh) script handles everything — installs **uv**, external tools (nmap and optionally nuclei), creates a Python 3.12 virtual environment, syncs dependencies (including Playwright), installs NetPal in editable mode, and downloads the Chromium browser for Playwright:
+The [`install.sh`](install.sh) script handles everything — installs **uv**, external tools (nmap and optionally nuclei), creates a Python 3.12 virtual environment, syncs dependencies (including Playwright), installs NetPal in editable mode, downloads the Chromium browser for Playwright, and verifies that Playwright can actually launch:
 
 ```bash
 git clone https://github.com/DefenderGB/NetPal.git
@@ -82,13 +87,16 @@ netpal/
 ├── config/
 │   ├── config.json                # Runtime configuration
 │   ├── ai_prompts.json            # AI finding prompts
-│   └── exploit_tools.json         # Tool automation config
+│   ├── exploit_tools.json         # Tool automation config
+│   └── recon_types.json           # Recon metadata + testcase port mapping
 ├── models/                        # Data models
 │   ├── project.py                 # Project container
 │   ├── asset.py                   # Scan target
 │   ├── host.py                    # Discovered host
 │   ├── service.py                 # Network service
-│   └── finding.py                 # Security finding
+│   ├── finding.py                 # Security finding
+│   ├── test_case.py               # Test case entry
+│   └── test_case_registry.py      # Project-local testcase registry
 ├── modes/                         # Subcommand handlers (Template Method)
 │   ├── __init__.py                # Exports all handlers
 │   ├── base_handler.py            # Abstract ModeHandler base class
@@ -100,6 +108,8 @@ netpal/
 │   ├── ai_enhance_handler.py      # netpal ai-report-enhance
 │   ├── findings_cli_handler.py    # netpal findings
 │   ├── hosts_handler.py           # netpal hosts
+│   ├── ad_scan_handler.py         # netpal ad-scan
+│   ├── testcase_handler.py        # netpal testcase
 │   ├── list_handler.py            # netpal list
 │   ├── project_edit_handler.py    # netpal project-edit
 │   ├── export_handler.py          # netpal export
@@ -127,6 +137,8 @@ netpal/
 │   ├── nmap/                      # Nmap subsystem
 │   │   ├── command_builder.py     # Builds nmap command strings
 │   │   └── scanner.py             # Scanner orchestrator (sequential execution)
+│   ├── ad/                        # Local LDAP + BloodHound collection
+│   ├── testcase/                  # CSV loading + testcase registry management
 │   └── tools/                     # Tool runner subsystem
 │       ├── base.py                # Abstract tool runner
 │       ├── http_tool_runner.py    # HTTP-based tools
@@ -167,6 +179,8 @@ netpal ai-review …              → AIReviewHandler
 netpal ai-report-enhance …     → AIEnhanceHandler
 netpal findings …               → FindingsCLIHandler
 netpal hosts …                  → HostsHandler
+netpal ad-scan …                → ADScanHandler
+netpal testcase …               → TestcaseHandler
 netpal project-edit …           → ProjectEditHandler
 netpal export …                 → ExportHandler
 netpal setup                    → SetupHandler
@@ -290,7 +304,7 @@ In the TUI, a "Re-run auto-tools" dropdown provides the same options (2 days, 7 
 
 ## Interactive TUI (`tui.py`)
 
-The TUI (`netpal interactive`) uses Textual and provides a state-driven, non-linear interface with five views: Projects, Assets, Recon, Evidence, and Settings. Views unlock progressively based on project state.
+The TUI (`netpal interactive`) uses Textual and provides a state-driven, non-linear interface with project editing, assets, recon, tools, hosts, manual findings, AI enhancement, AD scan, testcase tracking, and settings. Views unlock progressively based on project state. Startup now fails fast if required runtime tools (`nmap` or Playwright/Chromium) are unavailable, and the project-creation modal can capture AD metadata plus optionally seed an initial asset from just an asset type and target.
 
 To add a new TUI view:
 
@@ -311,6 +325,7 @@ To add a new TUI view:
 
 Before submitting changes:
 - Verify `python -m compileall netpal netpalui` passes on modified areas
+- Verify `uv run netpal --help`, `uv run netpal interactive --help`, `uv run netpal ad-scan --help`, and `uv run netpal testcase --help`
 - Test affected subcommands end-to-end
 - Verify `--help` output is correct
 - Check next-command suggestions print for relevant transitions

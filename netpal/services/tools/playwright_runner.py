@@ -42,6 +42,18 @@ class PlaywrightRunner(BaseToolRunner):
         except ImportError:
             return False
 
+    @staticmethod
+    def _format_runtime_error(error: Exception) -> str:
+        """Return a friendlier Playwright runtime error message."""
+        message = str(error)
+        lowered = message.lower()
+        if "executable doesn't exist" in lowered or "executable does not exist" in lowered:
+            return (
+                "Playwright browser runtime is missing. "
+                "Run `uv run playwright install chromium` or rerun `bash install.sh`."
+            )
+        return f"Error running Playwright: {message}"
+
     def _is_driver_healthy(self) -> bool:
         """Verify the Playwright Node.js driver binary can actually execute.
 
@@ -260,9 +272,7 @@ class PlaywrightRunner(BaseToolRunner):
             )
 
         except Exception as e:
-            return ToolExecutionResult.error_result(
-                f"Error running Playwright: {e}"
-            )
+            return ToolExecutionResult.error_result(self._format_runtime_error(e))
 
     def get_result_file(self, result: ToolExecutionResult) -> Optional[str]:
         """Extract the text result file from an execution result.
@@ -440,6 +450,11 @@ class PlaywrightRunner(BaseToolRunner):
             )
 
         except Exception as e:
-            return ToolExecutionResult.error_result(
-                f"Error running Playwright capture_path: {e}"
-            )
+            message = self._format_runtime_error(e)
+            if message.startswith("Error running Playwright: "):
+                message = message.replace(
+                    "Error running Playwright: ",
+                    "Error running Playwright capture_path: ",
+                    1,
+                )
+            return ToolExecutionResult.error_result(message)

@@ -55,11 +55,15 @@ uv run netpal website
 uv run netpal-mcp
 ```
 
+`netpal interactive` and `netpal website` should fail fast if required runtime tools (`nmap` or Playwright/Chromium) are unavailable.
+
 Useful verification commands:
 
 ```bash
 uv run netpal --help
 uv run netpal interactive --help
+uv run netpal ad-scan --help
+uv run netpal testcase --help
 uv run python -m compileall netpal netpalui
 ```
 
@@ -94,6 +98,8 @@ Most CLI behavior lives in `netpal/modes/`.
 - `ai_enhance_handler.py`: enhance existing findings
 - `findings_cli_handler.py`: findings view/delete
 - `hosts_handler.py`: host/service/evidence view
+- `ad_scan_handler.py`: local AD LDAP collection
+- `testcase_handler.py`: local testcase attach/load/status workflows
 - `export_handler.py`: zip export
 - `delete_handler.py`: delete local project data
 - `auto_handler.py`: automated pipeline
@@ -108,6 +114,8 @@ Core data structures live in `netpal/models/`.
 - `host.py`: discovered hosts
 - `service.py`: services and proofs/evidence
 - `finding.py`: AI/manual findings
+- `test_case.py`: testcase entries
+- `test_case_registry.py`: per-project testcase state
 
 ### Local Persistence
 
@@ -128,6 +136,7 @@ Important rule: project storage is local-only.
 - `netpal/config/config.json.example`: example config
 - `netpal/config/ai_prompts.json`: AI prompt templates
 - `netpal/config/exploit_tools.json`: auto-tool definitions
+- `netpal/config/recon_types.json`: scan metadata + testcase mapping
 
 ### Recon And Scanning
 
@@ -136,6 +145,8 @@ Important rule: project storage is local-only.
 - `netpal/services/nmap/scanner.py`: nmap execution engine
 - `netpal/services/nmap/command_builder.py`: nmap command generation
 - `netpal/services/xml_parser.py`: parse nmap XML results
+- `netpal/services/ad/`: local LDAP/BloodHound collection
+- `netpal/services/testcase/`: CSV testcase loading + registry management
 
 ### Tool Automation
 
@@ -223,4 +234,3 @@ python3 -m compileall netpal netpalui
 - `README.md`
 - `CONTRIBUTION.md`
 - `AGENTS.md`
-

@@ -11,6 +11,8 @@ def register_project_tools(mcp):
         name: str,
         description: str = "",
         external_id: str = "",
+        ad_domain: str = "",
+        ad_dc_ip: str = "",
     ) -> dict:
         """Create a new penetration testing project and set it as active.
 
@@ -23,42 +25,26 @@ def register_project_tools(mcp):
             Dict with project_id, name, external_id, and message.
         """
         from ..mcp_server import get_netpal_ctx
-        from ..models.project import Project
-        from ..utils.persistence.file_utils import list_registered_projects
-        from ..utils.persistence.project_persistence import save_project_to_file
-        from ..utils.config_loader import ConfigLoader
+        from ..utils.persistence.project_utils import create_project_headless
 
         nctx = get_netpal_ctx(ctx)
-
-        if not name or not name.strip():
-            raise ValueError("Project name is required")
-
-        name = name.strip()
-
-        # Check for duplicate name
-        existing = list_registered_projects()
-        for proj in existing:
-            if proj.get("name", "").lower() == name.lower():
-                return {
-                    "error": f"Project '{proj['name']}' already exists (ID: {proj['id']}). "
-                             f"Use project_switch to activate it.",
-                    "existing_project_id": proj["id"],
-                    "existing_project_name": proj["name"],
-                }
-
-        # Create project
-        project = Project(name=name)
-        if external_id:
-            project.external_id = external_id.strip()
-
-        save_project_to_file(project)
-        ConfigLoader.update_config_project_name(name)
-        nctx.config["project_name"] = name
+        project = create_project_headless(
+            name=name,
+            config=nctx.config,
+            description=description,
+            external_id=external_id,
+            ad_domain=ad_domain,
+            ad_dc_ip=ad_dc_ip,
+        )
 
         return {
             "project_id": project.project_id,
             "name": project.name,
             "external_id": project.external_id,
+            "description": project.description,
+            "ad_domain": project.ad_domain,
+            "ad_dc_ip": project.ad_dc_ip,
+            "metadata": project.metadata,
             "message": f"Project '{name}' created and set as active.",
         }
 
@@ -96,6 +82,9 @@ def register_project_tools(mcp):
             "project_id": match.get("id", ""),
             "name": project_name,
             "external_id": match.get("external_id", ""),
+            "ad_domain": match.get("ad_domain", ""),
+            "ad_dc_ip": match.get("ad_dc_ip", ""),
+            "metadata": match.get("metadata", {}),
             "previous_project": old_name if old_name != project_name else None,
             "message": f"Active project switched to '{project_name}'.",
         }
@@ -104,7 +93,10 @@ def register_project_tools(mcp):
     def project_edit(
         ctx: Context,
         name: str = "",
+        description: str = "",
         external_id: str = "",
+        ad_domain: str = "",
+        ad_dc_ip: str = "",
     ) -> dict:
         """Edit the active project's metadata (name and external ID).
 
@@ -142,9 +134,19 @@ def register_project_tools(mcp):
         project_id = match["id"]
         old_name = match.get("name", "")
         old_ext_id = match.get("external_id", "")
+        old_ad_domain = match.get("ad_domain", "")
+        old_ad_dc_ip = match.get("ad_dc_ip", "")
+
+        project_path = get_project_path(project_id)
+        project_data = load_json(project_path, default=None) or {}
+        metadata = project_data.get("metadata", {}) or {}
+        old_description = metadata.get("description", "")
 
         new_name = name.strip() if name else old_name
         new_ext_id = external_id.strip() if external_id else old_ext_id
+        new_description = description.strip() if description else old_description
+        new_ad_domain = ad_domain.strip() if ad_domain else old_ad_domain
+        new_ad_dc_ip = ad_dc_ip.strip() if ad_dc_ip else old_ad_dc_ip
 
         changes = {}
         if new_name != old_name:
@@ -156,6 +158,12 @@ def register_project_tools(mcp):
 
         if new_ext_id != old_ext_id:
             changes["external_id"] = {"old": old_ext_id, "new": new_ext_id}
+        if new_description != old_description:
+            changes["description"] = {"old": old_description, "new": new_description}
+        if new_ad_domain != old_ad_domain:
+            changes["ad_domain"] = {"old": old_ad_domain, "new": new_ad_domain}
+        if new_ad_dc_ip != old_ad_dc_ip:
+            changes["ad_dc_ip"] = {"old": old_ad_dc_ip, "new": new_ad_dc_ip}
 
         if not changes:
             return {"message": "No changes made.", "project_id": project_id, "name": old_name}
@@ -166,16 +174,28 @@ def register_project_tools(mcp):
             if entry.get("id") == project_id:
                 entry["name"] = new_name
                 entry["external_id"] = new_ext_id
+                entry["ad_domain"] = new_ad_domain
+                entry["ad_dc_ip"] = new_ad_dc_ip
+                entry["metadata"] = {
+                    **metadata,
+                    **({"description": new_description} if new_description else {}),
+                }
                 entry["updated_utc_ts"] = int(time.time())
                 break
         save_projects_registry(registry)
 
         # Update project JSON
-        project_path = get_project_path(project_id)
-        project_data = load_json(project_path, default=None)
         if project_data:
             project_data["name"] = new_name
             project_data["external_id"] = new_ext_id
+            project_data["ad_domain"] = new_ad_domain
+            project_data["ad_dc_ip"] = new_ad_dc_ip
+            metadata = project_data.get("metadata", {}) or {}
+            if new_description:
+                metadata["description"] = new_description
+            else:
+                metadata.pop("description", None)
+            project_data["metadata"] = metadata
             project_data["modified_utc_ts"] = int(time.time())
             save_json(project_path, project_data, compact=False)
 
@@ -188,6 +208,10 @@ def register_project_tools(mcp):
             "project_id": project_id,
             "name": new_name,
             "external_id": new_ext_id,
+            "description": new_description,
+            "ad_domain": new_ad_domain,
+            "ad_dc_ip": new_ad_dc_ip,
+            "metadata": project_data.get("metadata", {}),
             "changes": changes,
             "message": f"Project updated: {', '.join(changes.keys())} changed.",
         }

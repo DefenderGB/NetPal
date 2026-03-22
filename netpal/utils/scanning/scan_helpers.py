@@ -11,10 +11,11 @@ from colorama import Fore, Style
 # before advancing to the next chunk.
 CHUNK_THRESHOLD = 250
 from ..persistence.file_utils import ensure_dir, get_scan_results_dir, resolve_scan_results_path
+from ..config_loader import ConfigLoader
 
 
 def execute_discovery_scan(scanner, asset, project, config, speed=None, callback=None,
-                           verbose=False):
+                           verbose=False, scan_type="nmap-discovery", network_id="unknown"):
     """
     Execute discovery phase (ping scan) for an asset.
     
@@ -35,7 +36,11 @@ def execute_discovery_scan(scanner, asset, project, config, speed=None, callback
     exclude_ports = config.get('exclude-ports')
     
     # Build nmap command preview for notification
-    nmap_cmd = "nmap -sn"
+    recon_type = ConfigLoader.get_recon_type(scan_type)
+    if recon_type and recon_type.get("nmap_flags"):
+        nmap_cmd = "nmap " + " ".join(recon_type["nmap_flags"])
+    else:
+        nmap_cmd = "nmap -sn"
     if verbose:
         nmap_cmd += " -v"
     if interface:
@@ -50,21 +55,22 @@ def execute_discovery_scan(scanner, asset, project, config, speed=None, callback
         nmap_cmd += f" {asset.network}"
         hosts, error = scanner.scan_network(
             asset.network,
-            scan_type="ping",
+            scan_type=scan_type,
             project_name=project.project_id,
             interface=interface,
             exclude=exclude,
             exclude_ports=exclude_ports,
             callback=callback,
             speed=speed,
-            verbose=verbose
+            verbose=verbose,
+            network_id=network_id,
         )
     elif asset.type == 'list':
         if asset.file:
             nmap_cmd += f" -iL {resolve_scan_results_path(asset.file)}"
             hosts, error = scanner.scan_list(
                 None,
-                scan_type="ping",
+                scan_type=scan_type,
                 project_name=project.project_id,
                 asset_name=asset.get_identifier(),
                 interface=interface,
@@ -74,7 +80,8 @@ def execute_discovery_scan(scanner, asset, project, config, speed=None, callback
                 use_file=True,
                 file_path=resolve_scan_results_path(asset.file),
                 speed=speed,
-                verbose=verbose
+                verbose=verbose,
+                network_id=network_id,
             )
         else:
             # Load hosts from file
@@ -84,7 +91,7 @@ def execute_discovery_scan(scanner, asset, project, config, speed=None, callback
             nmap_cmd += f" {' '.join(host_list[:3])}{'...' if len(host_list) > 3 else ''}"
             hosts, error = scanner.scan_list(
                 host_list,
-                scan_type="ping",
+                scan_type=scan_type,
                 project_name=project.project_id,
                 asset_name=asset.get_identifier(),
                 interface=interface,
@@ -92,13 +99,14 @@ def execute_discovery_scan(scanner, asset, project, config, speed=None, callback
                 exclude_ports=exclude_ports,
                 callback=callback,
                 speed=speed,
-                verbose=verbose
+                verbose=verbose,
+                network_id=network_id,
             )
     else:  # single
         nmap_cmd += f" {asset.target}"
         hosts, error = scanner.scan_single(
             asset.target,
-            scan_type="ping",
+            scan_type=scan_type,
             project_name=project.project_id,
             asset_name=asset.get_identifier(),
             interface=interface,
@@ -106,15 +114,83 @@ def execute_discovery_scan(scanner, asset, project, config, speed=None, callback
             exclude_ports=exclude_ports,
             callback=callback,
             speed=speed,
-            verbose=verbose
+            verbose=verbose,
+            network_id=network_id,
         )
     
     return hosts, error, nmap_cmd
 
 
+def execute_unified_discovery(scanner, asset, project, config, speed=None, callback=None,
+                              verbose=False, network_id="unknown", scan_type="discover"):
+    """Execute a phased discovery scan defined in ``recon_types.json``."""
+    discovery_type = ConfigLoader.get_recon_type(scan_type)
+    phases = discovery_type.get("phases", []) if discovery_type else []
+
+    all_hosts = []
+    errors = []
+    cmd_parts = []
+
+    for phase in phases:
+        source_id = phase.get("source")
+        phase_label = phase.get("label", source_id or "phase")
+        if not source_id:
+            continue
+
+        if callback:
+            callback(f"\n{'-' * 50}\nPhase: {phase_label}\n{'-' * 50}\n")
+
+        hosts, error, nmap_cmd = execute_discovery_scan(
+            scanner,
+            asset,
+            project,
+            config,
+            speed=speed,
+            callback=callback,
+            verbose=verbose,
+            scan_type=source_id,
+            network_id=network_id,
+        )
+        if hosts:
+            all_hosts.extend(hosts)
+        if error:
+            errors.append(f"{phase_label}: {error}")
+        if nmap_cmd:
+            cmd_parts.append(nmap_cmd)
+
+    combined_error = "; ".join(errors) if errors else None
+    cmd_summary = " | ".join(cmd_parts) if cmd_parts else None
+    return all_hosts, combined_error, cmd_summary
+
+
+def _deduplicate_hosts_by_identity(hosts):
+    """Return hosts merged by (IP, network_id) identity."""
+    deduped = []
+    seen = {}
+    for host in hosts or []:
+        identity = (host.ip, getattr(host, "network_id", "unknown"))
+        existing = seen.get(identity)
+        if existing is None:
+            seen[identity] = host
+            deduped.append(host)
+            continue
+        for service in host.services:
+            existing.add_service(service)
+        for finding_id in getattr(host, "findings", []):
+            if finding_id not in existing.findings:
+                existing.findings.append(finding_id)
+        if not existing.hostname and host.hostname:
+            existing.hostname = host.hostname
+        if not existing.os and host.os:
+            existing.os = host.os
+        if getattr(host, "metadata", None):
+            existing.metadata.update(host.metadata)
+    return deduped
+
+
 def execute_recon_scan(scanner, asset, project, target, interface, scan_type, custom_ports,
                        speed, skip_discovery, verbose, exclude, exclude_ports, callback,
-                       host_ips=None, chunk_file=None):
+                       host_ips=None, chunk_file=None, network_id="unknown"):
     """
     Execute reconnaissance scan on asset or specific target.
     
@@ -155,16 +231,12 @@ def execute_recon_scan(scanner, asset, project, target, interface, scan_type, cu
         nmap_cmd += f" -T{speed}"
     
     # Add scan type flags
-    if scan_type == "top100":
-        nmap_cmd += " --top-ports 100 -sV"
-    elif scan_type == "http_ports":
-        nmap_cmd += " -p 80,443,593,808,3000,4443,5800,5801,7443,7627,8000,8003,8008,8080,8443,8888 -sV"
-    elif scan_type == "netsec_known":
-        nmap_cmd += " -p 21,22,23,25,53,80,110,111,135,139,143,443,445,993,995,1723,3306,3389,5900,7070,8080 -sV"
-    elif scan_type == "all_ports":
-        nmap_cmd += " -p- -sV"
-    elif scan_type == "custom" and custom_ports:
+    if scan_type == "custom" and custom_ports:
         nmap_cmd += f" -p {custom_ports} -sV"
+    else:
+        recon_type = ConfigLoader.get_recon_type(scan_type)
+        if recon_type and recon_type.get("nmap_flags"):
+            nmap_cmd += " " + " ".join(recon_type["nmap_flags"])
     
     if interface:
         nmap_cmd += f" -e {interface}"
@@ -182,7 +254,7 @@ def execute_recon_scan(scanner, asset, project, target, interface, scan_type, cu
         # fall back to filtering project hosts by asset.
         if host_ips is None:
             asset_hosts = [h for h in project.hosts if asset.asset_id in h.assets]
-            host_ips = [h.ip for h in asset_hosts]
+            host_ips = [h.scan_target for h in asset_hosts]
         
         if len(host_ips) > 50:
             # Use pre-created chunk file if provided, otherwise create one
@@ -214,7 +286,8 @@ def execute_recon_scan(scanner, asset, project, target, interface, scan_type, cu
                 file_path=list_file,
                 speed=speed,
                 skip_discovery=skip_discovery,
-                verbose=verbose
+                verbose=verbose,
+                network_id=network_id,
             )
         else:
             # Use comma-separated list for ≤50 hosts
@@ -233,7 +306,8 @@ def execute_recon_scan(scanner, asset, project, target, interface, scan_type, cu
                 callback=callback,
                 speed=speed,
                 skip_discovery=skip_discovery,
-                verbose=verbose
+                verbose=verbose,
+                network_id=network_id,
             )
     
     elif target == asset.get_identifier():
@@ -250,7 +324,8 @@ def execute_recon_scan(scanner, asset, project, target, interface, scan_type, cu
                 callback=callback,
                 speed=speed,
                 skip_discovery=skip_discovery,
-                verbose=verbose
+                verbose=verbose,
+                network_id=network_id,
             )
         elif asset.type == 'list':
             nmap_cmd += f" -iL {resolve_scan_results_path(asset.file)}"
@@ -267,7 +342,8 @@ def execute_recon_scan(scanner, asset, project, target, interface, scan_type, cu
                 file_path=resolve_scan_results_path(asset.file),
                 speed=speed,
                 skip_discovery=skip_discovery,
-                verbose=verbose
+                verbose=verbose,
+                network_id=network_id,
             )
         else:  # single
             nmap_cmd += f" {asset.target}"
@@ -283,7 +359,8 @@ def execute_recon_scan(scanner, asset, project, target, interface, scan_type, cu
                 custom_ports=custom_ports,
                 speed=speed,
                 skip_discovery=skip_discovery,
-                verbose=verbose
+                verbose=verbose,
+                network_id=network_id,
             )
     else:
         # Scan specific host
@@ -300,10 +377,35 @@ def execute_recon_scan(scanner, asset, project, target, interface, scan_type, cu
             custom_ports=custom_ports,
             speed=speed,
             skip_discovery=skip_discovery,
-            verbose=verbose
+            verbose=verbose,
+            network_id=network_id,
         )
     
     return hosts, error, nmap_cmd
+
+
+def _map_tool_testcases(project, host, exploit_tools, port):
+    """Map tool- and port-level testcase names onto host metadata."""
+    if not host:
+        return
+    try:
+        from ...services.testcase.manager import TestCaseManager
+
+        registry = TestCaseManager(ConfigLoader.load_config_json()).get_registry(project.project_id)
+        if not registry.test_cases:
+            return
+
+        for tool in exploit_tools:
+            tc_id = TestCaseManager.resolve_testcase_for_tool(registry, tool)
+            if tc_id:
+                host.metadata[tc_id] = True
+
+        for recon_type in ConfigLoader.load_recon_types():
+            tc_id = TestCaseManager.resolve_testcase_for_port(registry, recon_type, port)
+            if tc_id:
+                host.metadata[tc_id] = True
+    except Exception:
+        pass
 
 
 def run_exploit_tools_on_hosts(tool_runner, hosts, asset, exploit_tools, project, callback,
@@ -330,7 +432,7 @@ def run_exploit_tools_on_hosts(tool_runner, hosts, asset, exploit_tools, project
         for service in host.services:
             # Look up existing proofs from the project copy of this service
             existing_proofs = None
-            project_host = project.get_host_by_ip(host.ip)
+            project_host = project.get_host_by_identity(host.ip, getattr(host, "network_id", "unknown"))
             if project_host:
                 project_service = project_host.get_service(service.port)
                 if project_service:
@@ -349,7 +451,7 @@ def run_exploit_tools_on_hosts(tool_runner, hosts, asset, exploit_tools, project
             )
             
             # Add proofs to service
-            project_host = project.get_host_by_ip(host.ip)
+            project_host = project.get_host_by_identity(host.ip, getattr(host, "network_id", "unknown"))
             if project_host:
                 project_service = project_host.get_service(service.port)
                 if project_service:
@@ -372,6 +474,8 @@ def run_exploit_tools_on_hosts(tool_runner, hosts, asset, exploit_tools, project
                         for finding in findings:
                             finding.host_id = project_host.host_id
                             project.add_finding(finding)
+
+            _map_tool_testcases(project, project_host, exploit_tools, service.port)
     
     # Save project with new evidence
     save_project_callback()
@@ -383,6 +487,7 @@ def scan_and_run_tools_on_discovered_hosts(
     exclude, exclude_ports, speed, skip_discovery, verbose, exploit_tools,
     callback, save_project_callback, save_findings_callback,
     rerun_autotools="2", custom_ports=None, resume_chunk=None, config=None,
+    network_id="unknown",
 ):
     """Scan a list of discovered host IPs with automatic chunking and exploit tools.
 
@@ -432,6 +537,7 @@ def scan_and_run_tools_on_discovered_hosts(
             speed, skip_discovery, verbose,
             exclude, exclude_ports, callback,
             host_ips=host_ips,
+            network_id=network_id,
         )
         if error and callback:
             callback(f"\n[ERROR] {error}\n")
@@ -518,6 +624,7 @@ def scan_and_run_tools_on_discovered_hosts(
                             exclude, exclude_ports, callback,
                             host_ips=existing_ips,
                             chunk_file=existing_path,
+                            network_id=network_id,
                         )
                         if hosts:
                             for h in hosts:
@@ -559,6 +666,7 @@ def scan_and_run_tools_on_discovered_hosts(
             exclude, exclude_ports, callback,
             host_ips=chunk_ips,
             chunk_file=chunk_path,
+            network_id=network_id,
         )
 
         if error:
@@ -662,7 +770,7 @@ def send_scan_notification(notifier, project, asset_name, scan_type, hosts_disco
 
 
 def run_discovery_phase(scanner, asset, project, config, speed=None, output_callback=None,
-                        verbose=False):
+                        verbose=False, scan_type="nmap-discovery", network_context=None):
     """Run discovery phase (ping scan).
     
     Args:
@@ -678,15 +786,37 @@ def run_discovery_phase(scanner, asset, project, config, speed=None, output_call
         List of discovered Host objects
     """
     from ...services.notification_service import NotificationService
+    from ..network_context import detect_network_context
 
     start_time = time.time()
     
-    print(f"\n{Fore.CYAN}  ▸ Discovery Phase{Style.RESET_ALL}\n")
-    
-    # Execute discovery scan
-    hosts, error, nmap_cmd = execute_discovery_scan(
-        scanner, asset, project, config, speed, output_callback, verbose=verbose
-    )
+    iface = config.get("network_interface", "")
+    if network_context is None:
+        network_context = detect_network_context(iface)
+
+    print(f"\n{Fore.CYAN}  ▸ Discovery Phase ({scan_type}){Style.RESET_ALL}\n")
+    print(f"{Fore.CYAN}  Network context: {network_context.label}{Style.RESET_ALL}\n")
+
+    recon_type = ConfigLoader.get_recon_type(scan_type)
+    if recon_type and recon_type.get("phases"):
+        hosts, error, nmap_cmd = execute_unified_discovery(
+            scanner,
+            asset,
+            project,
+            config,
+            speed=speed,
+            callback=output_callback,
+            verbose=verbose,
+            network_id=network_context.network_id,
+            scan_type=scan_type,
+        )
+    else:
+        hosts, error, nmap_cmd = execute_discovery_scan(
+            scanner, asset, project, config, speed, output_callback,
+            verbose=verbose, scan_type=scan_type, network_id=network_context.network_id
+        )
+
+    hosts = _deduplicate_hosts_by_identity(hosts)
     
     if error:
         print(f"\n{Fore.RED}[ERROR] {error}{Style.RESET_ALL}")
@@ -701,7 +831,7 @@ def run_discovery_phase(scanner, asset, project, config, speed=None, output_call
         
         notifier = NotificationService(config)
         send_scan_notification(
-            notifier, project, asset.name, "Discovery (Ping Scan)",
+            notifier, project, asset.name, f"Discovery ({scan_type})",
             len(hosts), 0, 0, duration_str, nmap_cmd
         )
     else:

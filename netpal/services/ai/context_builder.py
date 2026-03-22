@@ -8,6 +8,8 @@ relevant information from Host objects and reading proof file contents.
 from typing import List, Dict, Optional, Callable
 import os
 
+from ...utils.persistence.file_utils import resolve_scan_results_path
+
 
 class ContextBuilder:
     """
@@ -81,6 +83,7 @@ class ContextBuilder:
             "ip": host.ip,
             "hostname": host.hostname,
             "os": host.os,
+            "network_id": getattr(host, "network_id", "unknown"),
             "services": []
         }
         
@@ -165,15 +168,16 @@ class ContextBuilder:
                     })
             
             # Collect screenshot file path
-            if screenshot_file and os.path.exists(screenshot_file):
+            resolved_screenshot = resolve_scan_results_path(screenshot_file) if screenshot_file else ""
+            if resolved_screenshot and os.path.exists(resolved_screenshot):
                 self._notify_file_reading(
-                    host, service, screenshot_file, 
+                    host, service, resolved_screenshot,
                     f"{proof.get('type')}_screenshot"
                 )
                 
                 screenshot_files.append({
                     "type": proof.get("type"),
-                    "path": screenshot_file
+                    "path": resolved_screenshot
                 })
         
         return evidence_contents, screenshot_files
@@ -190,10 +194,11 @@ class ContextBuilder:
             File content or None if read fails
         """
         try:
-            if not os.path.exists(file_path):
+            resolved_path = resolve_scan_results_path(file_path)
+            if not os.path.exists(resolved_path):
                 return None
             
-            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+            with open(resolved_path, 'r', encoding='utf-8', errors='ignore') as f:
                 content = f.read(max_chars)
                 if len(content) == max_chars:
                     content += "... [truncated]"

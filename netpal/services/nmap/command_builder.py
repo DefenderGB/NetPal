@@ -5,6 +5,8 @@ Provides a fluent interface for building complex nmap command lines.
 import shlex
 from typing import List, Optional, Tuple
 
+from ...utils.config_loader import ConfigLoader
+
 
 class NmapCommandBuilder:
     """
@@ -38,36 +40,40 @@ class NmapCommandBuilder:
         Add scan type flags.
         
         Args:
-            scan_type: Type of scan (ping, top100, top1000, http_ports, 
-                      netsec_known, all_ports, custom)
+            scan_type: Type of scan (nmap-discovery, top100, top1000,
+                      http, netsec, allports, custom)
             custom_ports: Custom port specification for custom scans
             
         Returns:
             Self for method chaining
         """
-        if scan_type == "ping":
+        if scan_type in {"ping", "nmap-discovery"}:
             self.cmd.extend(['-sn'])
         elif scan_type == "top100":
             self.cmd.extend(['--top-ports', '100', '-sV'])
         elif scan_type == "top1000":
             self.cmd.extend(['--top-ports', '1000', '-sV'])
-        elif scan_type == "http_ports":
+        elif scan_type in {"http_ports", "http"}:
             self.cmd.extend([
                 '-p', 
                 '80,443,593,808,3000,4443,5800,5801,7443,7627,8000,8003,8008,8080,8443,8888', 
                 '-sV'
             ])
-        elif scan_type == "netsec_known":
+        elif scan_type in {"netsec_known", "netsec"}:
             self.cmd.extend([
                 '-p', 
-                '21,22,23,25,53,80,110,111,135,139,143,443,445,993,995,1723,3306,3389,5900,7070,8080', 
+                '21,22,23,25,53,80,110,111,135,139,143,389,443,445,631,636,993,995,1723,3268,3306,3389,5900,7070,8080,11211',
                 '-sV'
             ])
-        elif scan_type == "all_ports":
+        elif scan_type in {"all_ports", "allports"}:
             self.cmd.extend(['-p-', '-sV'])
         elif scan_type == "custom" and custom_ports:
             self.cmd.extend(['-p', custom_ports, '-sV'])
-        
+        else:
+            recon_type = ConfigLoader.get_recon_type(scan_type)
+            if recon_type and recon_type.get("nmap_flags"):
+                self.cmd.extend(recon_type["nmap_flags"])
+
         return self
     
     def with_network_options(
@@ -146,7 +152,7 @@ class NmapCommandBuilder:
             Self for method chaining
         """
         # Only add user-agent for recon scans with -sV, not discovery scans
-        if user_agent and scan_type not in ["ping"]:
+        if user_agent and not ConfigLoader.is_discovery_scan(scan_type or ""):
             safe_ua = user_agent.replace('"', '\\"')
             self.cmd.extend(['--script-args', f"""'http.useragent="{safe_ua}"'"""])
         

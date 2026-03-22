@@ -233,16 +233,12 @@ def register_config_tools(mcp):
 
         # playwright
         try:
-            import subprocess
-            proc = subprocess.run(
-                ["python3", "-c", "import playwright; print('ok')"],
-                capture_output=True, text=True, timeout=10,
-            )
-            results["playwright"]["available"] = proc.returncode == 0
+            from ..utils.tool_paths import check_playwright_installed
+            results["playwright"]["available"] = check_playwright_installed()
             results["playwright"]["detail"] = (
-                "playwright installed"
+                "playwright package and Chromium browser available"
                 if results["playwright"]["available"]
-                else "playwright not installed"
+                else "playwright missing or Chromium browser not installed"
             )
         except Exception as e:
             results["playwright"]["detail"] = str(e)
