@@ -54,7 +54,7 @@ netpal setup
 |------|----------|-------|
 | Python 3.12 | Yes | Managed by uv |
 | [uv](https://docs.astral.sh/uv/) | Yes | Installed automatically by `install.sh` |
-| nmap | Yes | Sudo required for SYN scans; `install.sh` offers to configure passwordless sudo |
+| nmap | Yes | SYN scans need elevated privileges; `install.sh` now prefers Linux capabilities and falls back to passwordless sudo |
 | playwright | Yes | Python dependency; `install.sh` runs `playwright install chromium` automatically |
 | Go | Optional | Required to install nuclei |
 | nuclei | Yes | Vulnerability scanning with templates |
@@ -93,6 +93,7 @@ netpal/
 ├── config/
 │   ├── config.json                # Runtime configuration
 │   ├── ai_prompts.json            # AI finding prompts
+│   ├── creds.json.example         # Auto-tool credential template
 │   ├── exploit_tools.json         # Tool automation config
 │   └── recon_types.json           # Recon metadata + testcase port mapping
 ├── models/                        # Data models
@@ -124,7 +125,7 @@ netpal/
 ├── services/                      # Core services
 │   ├── nmap_scanner.py            # Multi-threaded nmap (deprecated facade)
 │   ├── tool_runner.py             # Tool automation (deprecated facade)
-│   ├── xml_parser.py              # Nmap XML parsing
+│   ├── xml_parser.py              # Nmap XML parsing + LDAP/microsoft-ds banner enrichment
 │   ├── ai_analyzer.py             # AI analysis (deprecated facade)
 │   ├── notification_service.py    # Webhook notifications
 │   ├── ai/                        # AI provider system
@@ -259,6 +260,7 @@ Tools are configured in `netpal/config/exploit_tools.json` and execute automatic
 | Type | Description |
 |---|---|
 | `nmap_custom` | Custom nmap NSE scripts |
+| `command_custom` | Generic command-based tools |
 | `http_custom` | HTTP tools with regex triggers |
 | `nuclei` | Nuclei vulnerability templates |
 
@@ -270,6 +272,7 @@ Tools are configured in `netpal/config/exploit_tools.json` and execute automatic
   "service_name": ["microsoft-ds", "netbios-ssn"],
   "tool_name": "SMB Vulnerability Scan",
   "tool_type": "nmap_custom",
+  "dup_run": true,
   "command": "nmap -p {port} --script smb-vuln* {ip}"
 }
 ```
@@ -279,11 +282,74 @@ Tools are configured in `netpal/config/exploit_tools.json` and execute automatic
 - `{ip}` — target IP
 - `{port}` — port number
 - `{protocol}` — `http` or `https`
-- `{path/to/upload/file.txt}` — auto-generated output path
+- `{path}` — auto-generated output path
+- `{domain}` — AD domain (for example `htb.local`)
+- `{domain_dn}` — AD domain split into LDAP DN components (for example `dc=htb,dc=local`)
+- `{domain0}`, `{domain1}`, ... — individual AD domain labels split on `.`
+- `{username}` — username from local `creds.json`
+- `{password}` — password from local `creds.json` (masked in logs/output metadata)
+
+Example LDAP auto tool:
+
+```json
+{
+  "port": [389],
+  "service_name": ["ldap"],
+  "tool_name": "LDAP Anonymous Search",
+  "tool_type": "command_custom",
+  "command": "ldapsearch -x -H ldap://{ip}:{port} -b \"{domain_dn}\""
+}
+```
+
+### Credential-Aware Auto Tools
+
+Credentials for auto tools are defined by the tracked template `netpal/config/creds.json.example`.
+NetPal auto-creates a local, gitignored `netpal/config/creds.json` from that example the first time credentials are loaded.
+The file contents are a JSON list:
+
+```json
+[
+  {
+    "username": "test",
+    "password": "test",
+    "type": "domain",
+    "use_in_auto_tools": false
+  }
+]
+```
+
+Rules:
+
+- `type` must be `domain` or `web`
+- `use_in_auto_tools: true` is required for the credential to be considered
+- If a tool command includes `{username}` or `{password}`, NetPal runs that tool once per matching enabled credential
+- Tool configs may add `cred_type: "domain"` or `cred_type: "web"` to limit which credentials are used
+- If `cred_type` is omitted or empty, all enabled credentials are eligible
+
+Example:
+
+```json
+{
+  "port": [445],
+  "service_name": ["smb", "microsoft-ds"],
+  "tool_name": "SMB Auth Check",
+  "tool_type": "command_custom",
+  "dup_run": false,
+  "cred_type": "domain",
+  "command": "crackmapexec smb {ip} -u \"{username}\" -p \"{password}\""
+}
+```
 
 ### Trigger Logic
 
 Tools run when a matching port **or** service name is found. For `http_custom` tools, the HTTP response must also match the `regex_match` pattern.
+
+### Duplicate Host Matches (`dup_run`)
+
+- `dup_run` defaults to `true`
+- When `dup_run: true`, the tool can run again on another matched service for the same host (for example `https` on both `443` and `9999`)
+- When `dup_run: false`, NetPal skips later matches on the same host once that tool has already run on another matched port/service
+- This duplicate-host check is separate from `--rerun-autotools`, which still controls whether a tool re-runs against the same recorded service proof
 
 ### Re-run Policy (`--rerun-autotools`)
 

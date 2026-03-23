@@ -7,11 +7,10 @@ specific patterns are found in HTTP responses.
 """
 import os
 import re
-import shlex
 from .base import BaseToolRunner, ToolExecutionResult
 from ...models.host import Host
 from ...models.service import Service
-from ...utils.naming_utils import sanitize_for_filename, validate_shell_safe
+from ...utils.naming_utils import sanitize_for_filename
 
 
 class HttpCustomToolRunner(BaseToolRunner):
@@ -53,7 +52,9 @@ class HttpCustomToolRunner(BaseToolRunner):
         asset_identifier: str,
         callback=None,
         tool_config: dict = None,
-        playwright_response_file: str = None
+        playwright_response_file: str = None,
+        project_domain: str = None,
+        credential: dict = None,
     ) -> ToolExecutionResult:
         """Run HTTP custom tool with regex matching on Playwright response.
         
@@ -107,36 +108,37 @@ class HttpCustomToolRunner(BaseToolRunner):
         output_file = os.path.join(output_dir, output_filename)
         
         # Build command from template using service model
-        protocol = service.get_protocol()
         command_template = tool_config.get('command', '')
         try:
-            safe_ip = validate_shell_safe(host.ip, "IP address")
-            safe_port = validate_shell_safe(str(service.port), "port")
-            safe_protocol = validate_shell_safe(protocol, "protocol")
+            command = self._render_command_args(
+                command_template,
+                host,
+                service,
+                output_path=output_file,
+                project_domain=project_domain,
+                credential=credential,
+            )
+            display_command = self._render_command_template(
+                command_template,
+                host,
+                service,
+                output_path=output_file,
+                project_domain=project_domain,
+                credential=credential,
+                mask_secrets=True,
+            )
         except ValueError as e:
             return ToolExecutionResult.error_result(str(e))
-        command_str = (command_template
-                      .replace('{ip}', safe_ip)
-                      .replace('{port}', safe_port)
-                      .replace('{protocol}', safe_protocol)
-                      .replace('{path}', output_file))
-        
-        try:
-            command = shlex.split(command_str)
-            command = [os.path.expanduser(arg) for arg in command]
-        except ValueError as e:
-            return ToolExecutionResult.error_result(
-                f"Failed to parse command template: {e}"
-            )
+        command = [os.path.expanduser(arg) for arg in command]
         
         try:
             if callback:
-                callback(f"[HTTP TOOL] {command_str}\n")
+                callback(f"[HTTP TOOL] {display_command}\n")
             
             result = self._run_subprocess(command, timeout=300, shell=False)
             
             if not os.path.exists(output_file) or os.path.getsize(output_file) == 0:
-                self._write_command_output(output_file, command_str, result.stdout, result.stderr)
+                self._write_command_output(output_file, display_command, result.stdout, result.stderr)
             
             return ToolExecutionResult.success_result(output_files=[output_file])
         

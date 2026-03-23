@@ -73,6 +73,13 @@ class BaseNetPalView(VerticalScroll):
     def refresh_view(self) -> None:
         """Refresh widget content when the app state changes."""
 
+    def reveal_widget(self, selector: str) -> None:
+        """Scroll a child widget into view for stacked layouts."""
+        try:
+            self.query_one(selector).scroll_visible(animate=False, force=True, immediate=True)
+        except Exception:
+            pass
+
 
 class TextAction(Static):
     """Compact clickable text control used in place of bulky buttons."""
@@ -146,6 +153,29 @@ class MetricStrip(Static):
     DEFAULT_CLASSES = "metric-strip"
 
 
+class StatusLine(Static):
+    """Hide empty status rows so dialogs don't reserve dead space."""
+
+    DEFAULT_CLASSES = "status-line"
+
+    def __init__(
+        self,
+        content: str = "",
+        *,
+        id: str | None = None,
+        classes: str | None = None,
+    ) -> None:
+        widget_classes = "status-line"
+        if classes:
+            widget_classes = f"{widget_classes} {classes}"
+        super().__init__(content, id=id, classes=widget_classes)
+        self.display = bool(str(content).strip())
+
+    def update(self, content: str = "") -> None:
+        super().update(content)
+        self.display = bool(str(content).strip())
+
+
 class DetailPane(Vertical):
     """Labeled detail pane with a dedicated body widget."""
 
@@ -176,4 +206,4 @@ class LogPanel(Vertical):
 
     def compose(self) -> ComposeResult:
         yield Static(self._title, classes="panel-title")
-        yield RichLog(id=self._log_id, highlight=True, markup=True, min_width=80, wrap=True)
+        yield RichLog(id=self._log_id, highlight=True, markup=True, min_width=0, wrap=True)

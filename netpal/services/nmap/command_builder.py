@@ -6,6 +6,7 @@ import shlex
 from typing import List, Optional, Tuple
 
 from ...utils.config_loader import ConfigLoader
+from ...utils.validation import get_nmap_base_command
 
 
 class NmapCommandBuilder:
@@ -27,7 +28,7 @@ class NmapCommandBuilder:
         Args:
             target: Target IP, hostname, network, or file path
         """
-        self.cmd: List[str] = ['sudo', 'nmap']
+        self.cmd: List[str] = get_nmap_base_command()
         self.target = target
         self._use_input_file = False
     

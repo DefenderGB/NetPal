@@ -1,7 +1,9 @@
 """
 Target and configuration validation utilities
 """
+import os
 import re
+import stat
 import shutil
 import subprocess
 import psutil
@@ -78,17 +80,16 @@ def validate_target(target: str):
 
 
 def check_sudo():
-    """Validate passwordless sudo for nmap and chown.
+    """Validate NetPal can run privileged nmap scans without prompting.
 
-    NetPal requires passwordless sudo for two tools:
-      • **nmap** — SYN scans require root privileges.
-      • **chown** — restoring file ownership after sudo nmap.
-
-    Verifies ``sudo -n nmap -V`` succeeds.  If it fails the user is
-    shown the exact sudoers line needed (covering both nmap and chown).
+    Accepts any of these execution paths:
+      • Linux file capabilities on the ``nmap`` binary
+      • setuid-root ``nmap``
+      • passwordless ``sudo nmap``
+      • running as root
 
     Returns:
-        True if sudo nmap executed successfully.
+        True when one of the supported privilege paths is available.
     """
     nmap_path = shutil.which('nmap')
     if not nmap_path:
@@ -96,30 +97,90 @@ def check_sudo():
         print(f"{Fore.YELLOW}Please install nmap before using NetPal.{Style.RESET_ALL}\n")
         return False
 
-    try:
-        result = subprocess.run(
-            ['sudo', '-n', nmap_path, '-V'],
-            capture_output=True,
-            text=True,
-            timeout=15,
-        )
-        if result.returncode == 0 and result.stdout.strip().startswith('Nmap version'):
-            return True
-    except Exception:
-        pass
+    if get_nmap_execution_mode():
+        return True
 
-    # sudo nmap failed — tell the user how to fix it
+    # No supported privilege path is available — tell the user how to fix it.
     chown_path = shutil.which('chown') or '/usr/bin/chown'
-    print(f"\n{Fore.RED}[ERROR] Unable to run 'sudo nmap' without a password.{Style.RESET_ALL}")
-    print(f"{Fore.YELLOW}NetPal requires passwordless sudo access to:{Style.RESET_ALL}")
-    print(f"  • {Fore.CYAN}nmap{Style.RESET_ALL}   ({nmap_path}) — SYN scans require root")
-    print(f"  • {Fore.CYAN}chown{Style.RESET_ALL}  ({chown_path}) — restore file ownership after scans")
-    print(f"\n{Fore.CYAN}To fix this, run:{Style.RESET_ALL}")
+    print(f"\n{Fore.RED}[ERROR] Unable to run privileged nmap scans without a password.{Style.RESET_ALL}")
+    print(f"{Fore.YELLOW}NetPal needs one of these privilege paths:{Style.RESET_ALL}")
+    print(f"  • {Fore.CYAN}Linux file capabilities{Style.RESET_ALL} on {nmap_path}")
+    print(f"  • {Fore.CYAN}setuid-root nmap{Style.RESET_ALL} on {nmap_path}")
+    print(f"  • {Fore.CYAN}passwordless sudo{Style.RESET_ALL} for {nmap_path} and {chown_path}")
+    if os.name == "posix" and shutil.which("setcap"):
+        print(f"\n{Fore.CYAN}Preferred Linux fix:{Style.RESET_ALL}")
+        print(f"  sudo setcap cap_net_raw,cap_net_admin,cap_net_bind_service+eip {nmap_path}")
+    print(f"\n{Fore.CYAN}Fallback sudoers fix:{Style.RESET_ALL}")
     print(f"  sudo sh -c \"echo '$USER ALL=(ALL) NOPASSWD: {nmap_path}, {chown_path}' > /etc/sudoers.d/netpal-$USER\"")
     print(f"  sudo chmod 0440 /etc/sudoers.d/netpal-$USER")
     print(f"\n{Fore.CYAN}Or re-run the installer:{Style.RESET_ALL}")
     print(f"  bash install.sh\n")
     return False
+
+
+def get_nmap_execution_mode() -> str | None:
+    """Return the available privilege mode for nmap, if any."""
+    nmap_path = shutil.which("nmap")
+    if not nmap_path:
+        return None
+
+    if hasattr(os, "geteuid") and os.geteuid() == 0:
+        return "root"
+    if _nmap_has_linux_capabilities(nmap_path):
+        return "capabilities"
+    if _nmap_is_setuid_root(nmap_path):
+        return "setuid"
+    if _passwordless_sudo_works(nmap_path):
+        return "sudo"
+    return None
+
+
+def get_nmap_base_command() -> list[str]:
+    """Return the command prefix NetPal should use for nmap."""
+    return ["sudo", "nmap"] if get_nmap_execution_mode() == "sudo" else ["nmap"]
+
+
+def _passwordless_sudo_works(nmap_path: str) -> bool:
+    try:
+        result = subprocess.run(
+            ["sudo", "-n", nmap_path, "-V"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        return result.returncode == 0 and result.stdout.strip().startswith("Nmap version")
+    except Exception:
+        return False
+
+
+def _nmap_has_linux_capabilities(nmap_path: str) -> bool:
+    getcap_path = shutil.which("getcap")
+    if not getcap_path:
+        return False
+
+    try:
+        result = subprocess.run(
+            [getcap_path, nmap_path],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except Exception:
+        return False
+
+    if result.returncode != 0:
+        return False
+
+    output = result.stdout.strip().lower()
+    return "cap_net_raw" in output or "cap_net_admin" in output
+
+
+def _nmap_is_setuid_root(nmap_path: str) -> bool:
+    try:
+        st = os.stat(nmap_path)
+    except OSError:
+        return False
+    return st.st_uid == 0 and bool(st.st_mode & stat.S_ISUID)
 
 
 def get_interfaces_with_ips():

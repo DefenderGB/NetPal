@@ -43,6 +43,8 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "notification_user_email": ""
 }
 
+DEFAULT_AUTO_TOOL_CREDENTIALS: List[Dict[str, Any]] = []
+
 
 class ConfigLoader:
     """Handles loading and saving configuration files."""
@@ -90,6 +92,45 @@ class ConfigLoader:
 
         cleanup_legacy_local_storage(config_path=config_path)
         return config_path
+
+    @staticmethod
+    def ensure_auto_tool_credentials_exists():
+        """
+        Ensure creds.json exists, creating it from creds.json.example if missing.
+
+        Returns:
+            Path to the creds.json file
+        """
+        creds_path = Path(ConfigLoader.get_config_path("creds.json"))
+        creds_example_path = Path(ConfigLoader.get_config_path("creds.json.example"))
+
+        if not creds_path.exists():
+            creds_path.parent.mkdir(parents=True, exist_ok=True)
+
+            credentials = list(DEFAULT_AUTO_TOOL_CREDENTIALS)
+            if creds_example_path.exists():
+                try:
+                    with open(creds_example_path, "r") as f:
+                        loaded = json.load(f)
+                    if isinstance(loaded, list):
+                        credentials = loaded
+                    elif isinstance(loaded, dict):
+                        credentials = loaded.get("credentials", [])
+                except Exception as e:
+                    print(f"Error loading creds.json.example: {e}")
+
+            with open(creds_path, "w") as f:
+                json.dump(credentials, f, indent=2)
+
+            print(
+                f"{Fore.YELLOW}[INFO] Created default creds.json at "
+                f"{creds_path}{Style.RESET_ALL}"
+            )
+            print(
+                f"{Fore.YELLOW}       Edit it to add auto-tool credentials.{Style.RESET_ALL}"
+            )
+
+        return creds_path
     
     @staticmethod
     def load_config_json():
@@ -131,6 +172,26 @@ class ConfigLoader:
             print(f"Error loading exploit_tools.json: {e}")
         
         return []
+
+    @staticmethod
+    def load_auto_tool_credentials():
+        """
+        Load creds.json configuration for auto-tool credentials.
+
+        Returns:
+            List of credential dictionaries
+        """
+        creds_path = ConfigLoader.ensure_auto_tool_credentials_exists()
+
+        try:
+            if os.path.exists(creds_path):
+                with open(creds_path, "r") as f:
+                    data = json.load(f)
+                    return data if isinstance(data, list) else data.get("credentials", [])
+        except Exception as e:
+            print(f"Error loading creds.json: {e}")
+
+        return list(DEFAULT_AUTO_TOOL_CREDENTIALS)
 
     @staticmethod
     def load_recon_types():

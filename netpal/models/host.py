@@ -85,6 +85,23 @@ class Host:
         if finding_id not in self.findings:
             self.findings.append(finding_id)
 
+    def merge_metadata(self, metadata: dict | None, overwrite: bool = False) -> None:
+        """Merge metadata into this host.
+
+        By default, only fills missing/empty keys so repeated recon scans
+        do not clobber operator-supplied or previously detected values.
+        """
+        if not metadata:
+            return
+
+        for key, value in metadata.items():
+            if value in (None, ""):
+                continue
+
+            current = self.metadata.get(key)
+            if overwrite or current in (None, ""):
+                self.metadata[key] = value
+
     @property
     def identity_key(self) -> tuple[str, str]:
         """Composite identity key for deduplication."""

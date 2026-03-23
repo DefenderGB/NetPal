@@ -116,6 +116,14 @@ class Project:
             host: Host object to add
             asset_id: Asset ID to associate with this host
         """
+        detected_ad_domain = (
+            (host.metadata or {}).get("ad_domain", "").strip()
+            if isinstance(host.metadata, dict)
+            else ""
+        )
+        if not self.ad_domain and detected_ad_domain:
+            self.ad_domain = detected_ad_domain
+
         # Network-aware deduplication: match on (IP, network_id)
         existing = self.get_host_by_identity(host.ip, host.network_id)
         
@@ -143,8 +151,7 @@ class Project:
                 existing.hostname = host.hostname
             if not existing.os and host.os:
                 existing.os = host.os
-            if host.metadata:
-                existing.metadata.update(host.metadata)
+            existing.merge_metadata(host.metadata)
         else:
             # New host - assign ID and add
             if host.host_id is None:

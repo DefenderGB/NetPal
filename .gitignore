@@ -1,5 +1,5 @@
 # Python
-__pycache__/
+*__pycache__/
 *.py[cod]
 *$py.class
 *.so
@@ -42,6 +42,7 @@ scan_results/
 *.png
 *.txt
 netpal/config/config.json
+netpal/config/creds.json
 
 # Logs
 *.log

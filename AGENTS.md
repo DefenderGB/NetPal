@@ -65,7 +65,13 @@ uv run netpal interactive --help
 uv run netpal ad-scan --help
 uv run netpal testcase --help
 uv run python -m compileall netpal netpalui
+uv run python -m unittest tests.test_tui_smoke
+uv run python -m unittest tests.test_tui_views
 ```
+
+For TUI/CSS/startup/layout changes, run `uv run python -m unittest tests.test_tui_smoke` before finishing.
+That smaller suite parses the Textual stylesheet directly and runs a couple of headless startup checks, so it catches CSS parse/startup regressions much faster.
+Use `uv run python -m unittest tests.test_tui_views` for broader TUI interaction changes or focused follow-up coverage.
 
 If the console script is unavailable for some reason, fallback:
 
@@ -135,6 +141,7 @@ Important rule: project storage is local-only.
 - `netpal/utils/config_loader.py`: config load/update/default creation
 - `netpal/utils/setup_wizard.py`: interactive setup flow
 - `netpal/config/config.json.example`: example config
+- `netpal/config/creds.json.example`: auto-tool credential template
 - `netpal/config/ai_prompts.json`: AI prompt templates
 - `netpal/config/exploit_tools.json`: auto-tool definitions
 - `netpal/config/recon_types.json`: scan metadata + testcase mapping
@@ -145,7 +152,7 @@ Important rule: project storage is local-only.
 - `netpal/utils/scanning/recon_executor.py`: orchestrates recon + tool execution
 - `netpal/services/nmap/scanner.py`: nmap execution engine
 - `netpal/services/nmap/command_builder.py`: nmap command generation
-- `netpal/services/xml_parser.py`: parse nmap XML results
+- `netpal/services/xml_parser.py`: parse nmap XML results and promote LDAP/`microsoft-ds` banner details into host/project metadata when missing
 - `netpal/services/ad/`: local LDAP/BloodHound collection
 - `netpal/services/testcase/`: CSV testcase loading + registry management
 

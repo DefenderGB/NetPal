@@ -230,9 +230,55 @@ Additional local data paths:
 
 Use `netpal ad-scan` to run local LDAP collection and produce BloodHound-compatible JSON for the active project.
 
+- Recon scans that see `ldap` or `microsoft-ds` banners will auto-fill a missing project `ad_domain` and enrich the matching host with discovered `hostname`, `metadata.product`, and `metadata.ostype` when those fields are still empty.
+- Auto tools can reuse that AD metadata via `{domain}`, `{domain_dn}`, or indexed `{domain0}`, `{domain1}`, ... placeholders inside `netpal/config/exploit_tools.json`.
 - Set `ad_domain` and `ad_dc_ip` first with `netpal project-edit` or the TUI project editor.
 - Dependencies include `ldap3` and `pycryptodome`.
 - Custom LDAP query output is written under `scan_results/<project_id>/ad_scan/ad_queries/`.
+
+## Auto Tool Credentials
+
+Auto tools can optionally pull credentials from a local `netpal/config/creds.json` when a tool command uses `{username}` and/or `{password}`.
+
+- `netpal/config/creds.json.example` is tracked in git as the template.
+- `netpal/config/creds.json` is gitignored and auto-created from the example the first time NetPal loads auto-tool credentials.
+
+- Each credential entry uses `username`, `password`, `type`, and `use_in_auto_tools`.
+- Supported credential `type` values are `domain` and `web`.
+- Tool configs may add `cred_type` to restrict which enabled credentials are used. Omit it or set it to an empty string to try all enabled credential types.
+- Passwords are masked in MCP config resources and auto-tool command metadata, but remain stored in `creds.json` for execution.
+
+Example `creds.json.example`:
+
+```json
+[
+  {
+    "username": "test",
+    "password": "test",
+    "type": "domain",
+    "use_in_auto_tools": false
+  },
+  {
+    "username": "webtest",
+    "password": "test",
+    "type": "web",
+    "use_in_auto_tools": false
+  }
+]
+```
+
+Example credential-aware auto tool:
+
+```json
+{
+  "port": [445],
+  "service_name": ["microsoft-ds", "smb"],
+  "tool_name": "SMB Auth Check",
+  "tool_type": "command_custom",
+  "cred_type": "domain",
+  "command": "crackmapexec smb {ip} -u \"{username}\" -p \"{password}\""
+}
+```
 
 ## Test Case Tracking
 
@@ -277,7 +323,8 @@ uv run playwright install chromium
 # Or rerun the full installer, which now verifies Playwright can launch
 bash install.sh
 
-# Passwordless sudo for nmap — install.sh offers to configure this automatically.
+# Privileged nmap execution — install.sh can configure Linux capabilities automatically.
+# Fallback: passwordless sudo for nmap + chown.
 # To set up manually:
 sudo sh -c "echo '$USER ALL=(ALL) NOPASSWD: $(which nmap), $(which chown)' > /etc/sudoers.d/netpal-$USER"
 sudo chmod 0440 /etc/sudoers.d/netpal-$USER

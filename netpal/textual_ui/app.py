@@ -34,6 +34,7 @@ from .components import (
     SafeDataTable,
     SectionHeader,
     SectionIntro,
+    StatusLine,
     TextAction,
 )
 from .helpers import (
@@ -74,6 +75,33 @@ from .theme import APP_CSS
 
 def _format_metric_line(*parts: str) -> str:
     return " | ".join(part for part in parts if part)
+
+
+_PROJECT_STATE_UNSET = object()
+_MEDIUM_NAV_LABELS = {
+    VIEW_PROJECTS: "Projects",
+    VIEW_ASSETS: "Assets",
+    VIEW_RECON: "Recon",
+    VIEW_TOOLS: "Tools",
+    VIEW_HOSTS: "Hosts",
+    VIEW_FINDINGS: "Findings",
+    VIEW_EVIDENCE: "AI",
+    VIEW_AD_SCAN: "AD",
+    VIEW_TESTCASES: "Tests",
+    VIEW_SETTINGS: "Config",
+}
+_NARROW_NAV_LABELS = {
+    VIEW_PROJECTS: "Proj",
+    VIEW_ASSETS: "Assets",
+    VIEW_RECON: "Recon",
+    VIEW_TOOLS: "Tools",
+    VIEW_HOSTS: "Hosts",
+    VIEW_FINDINGS: "Find",
+    VIEW_EVIDENCE: "AI",
+    VIEW_AD_SCAN: "AD",
+    VIEW_TESTCASES: "TC",
+    VIEW_SETTINGS: "Cfg",
+}
 
 
 class StandardModalScreen(ModalScreen):
@@ -124,7 +152,7 @@ class CreateProjectScreen(StandardModalScreen):
                     )
                     for i in range(5):
                         yield Static("", id=f"new-proj-asset-sug-{i}", classes="starter-asset-suggestion")
-            yield Static("", id="new-proj-status", classes="status-line")
+            yield StatusLine(id="new-proj-status")
             with ActionBar():
                 yield TextAction("Create", id="btn-do-create", variant="success")
                 yield TextAction("Cancel", id="btn-cancel-create", variant="default")
@@ -278,7 +306,7 @@ class EditProjectScreen(StandardModalScreen):
                     with Vertical():
                         yield Label("DC IP")
                         yield Input(id="edit-proj-dc-ip", value=project.ad_dc_ip or "")
-            yield Static("", id="edit-proj-status", classes="status-line")
+            yield StatusLine(id="edit-proj-status")
             with ActionBar():
                 yield TextAction("Save", id="btn-do-edit-project", variant="success")
                 yield TextAction("Cancel", id="btn-cancel-edit-project", variant="default")
@@ -350,7 +378,7 @@ class DeleteProjectScreen(StandardModalScreen):
                 ),
                 classes="modal-message",
             )
-            yield Static("", id="delete-status", classes="status-line")
+            yield StatusLine(id="delete-status")
             with ActionBar():
                 yield TextAction("Delete", id="btn-do-delete", variant="error")
                 yield TextAction("Cancel", id="btn-cancel-delete", variant="default")
@@ -401,7 +429,7 @@ class CreateAssetScreen(StandardModalScreen):
                         yield Input(id="new-asset-file", placeholder="e.g. /path/to/hosts.txt")
                         for i in range(5):
                             yield Static("", id=f"file-sug-{i}", classes="file-suggestion")
-            yield Static("", id="new-asset-status", classes="status-line")
+            yield StatusLine(id="new-asset-status")
             with ActionBar():
                 yield TextAction("Create", id="btn-do-create-asset", variant="success")
                 yield TextAction("Cancel", id="btn-cancel-create-asset", variant="default")
@@ -497,7 +525,7 @@ class DeleteAssetScreen(StandardModalScreen):
                 ),
                 classes="modal-message",
             )
-            yield Static("", id="delete-asset-status", classes="status-line")
+            yield StatusLine(id="delete-asset-status")
             with ActionBar():
                 yield TextAction("Delete", id="btn-do-delete-asset", variant="error")
                 yield TextAction("Cancel", id="btn-cancel-delete-asset", variant="default")
@@ -575,7 +603,7 @@ class CreateFindingScreen(StandardModalScreen):
                 yield Label("Proof Files")
                 with VerticalScroll(id="proof-container"):
                     yield Static("[dim]Select a host to see available proofs.[/]", id="proof-placeholder")
-            yield Static("", id="finding-status", classes="status-line")
+            yield StatusLine(id="finding-status")
             with ActionBar():
                 yield TextAction("Create", id="btn-do-create-finding", variant="success")
                 yield TextAction("Cancel", id="btn-cancel-create-finding", variant="default")
@@ -717,7 +745,7 @@ class EditTestCaseScreen(StandardModalScreen):
             )
             yield Label("Notes")
             yield TextArea(id="tc-edit-notes")
-            yield Static("", id="tc-edit-status-msg", classes="status-line")
+            yield StatusLine(id="tc-edit-status-msg")
             with ActionBar():
                 yield TextAction("Save", id="btn-tc-edit-save", variant="success")
                 yield TextAction("Cancel", id="btn-tc-edit-cancel", variant="default")
@@ -761,7 +789,7 @@ class ProjectsView(BaseNetPalView):
                     yield TextAction("Create Project", id="btn-create-project", variant="success")
                     yield TextAction("Edit Project", id="btn-edit-project", variant="primary")
                     yield TextAction("Delete Project", id="btn-delete-project", variant="error")
-                yield Static("", id="proj-status", classes="status-line")
+                yield StatusLine(id="proj-status")
             yield DetailPane("Selected Project", body_id="proj-detail", id="proj-detail-pane")
 
     def on_mount(self) -> None:
@@ -889,7 +917,7 @@ class ProjectsView(BaseNetPalView):
 
     def _on_edit_dismissed(self, project) -> None:
         if project is not None:
-            self.app.project = project
+            self.app.refresh_project_state(project)
             self.query_one("#proj-status", Static).update(
                 f"[green]Project '{project.name}' updated successfully.[/]"
             )
@@ -931,7 +959,7 @@ class AssetsView(BaseNetPalView):
                 with ActionBar(id="proj-action-bar"):
                     yield TextAction("Create Asset", id="btn-create-asset", variant="success")
                     yield TextAction("Delete Asset", id="btn-delete-asset", variant="error")
-                yield Static("", id="asset-status", classes="status-line")
+                yield StatusLine(id="asset-status")
             yield DetailPane("Selected Asset", body_id="asset-detail", id="asset-detail-pane")
 
     def on_mount(self) -> None:
@@ -1009,7 +1037,7 @@ class AssetsView(BaseNetPalView):
     def _on_create_dismissed(self, asset) -> None:
         if asset is not None:
             self.query_one("#asset-status", Static).update(f"[green]Created asset: {asset.name} ({asset.type})[/]")
-            self.app.project = self.app.project
+            self.app.refresh_project_state()
         self.refresh_view()
         self.app.refresh()
 
@@ -1029,7 +1057,7 @@ class AssetsView(BaseNetPalView):
             self.query_one("#asset-status", Static).update("[green]Asset deleted successfully.[/]")
             self.query_one("#asset-detail", Static).update("Select an asset to view details.")
             self._selected_asset_name = None
-            self.app.project = self.app.project
+            self.app.refresh_project_state()
         self.refresh_view()
         self.app.refresh()
 
@@ -1057,7 +1085,6 @@ class ReconView(BaseNetPalView):
         with Horizontal(classes="task-layout"):
             with Vertical(classes="task-form-pane"):
                 with Vertical(classes="form-card"):
-                    yield Static("Scan Profile", classes="panel-title")
                     with DenseFormGrid():
                         with Horizontal():
                             with Vertical():
@@ -1113,7 +1140,7 @@ class ReconView(BaseNetPalView):
                                 yield Input(id="recon-user-agent", placeholder="e.g. Mozilla/5.0 ...")
                 with ActionBar():
                     yield TextAction("Run Scan", id="btn-run-recon", variant="success")
-                yield Static("", id="recon-status", classes="status-line")
+                yield StatusLine(id="recon-status")
             yield LogPanel("Scan Activity", "recon-log", id="recon-log-panel")
 
     def on_mount(self) -> None:
@@ -1197,6 +1224,7 @@ class ReconView(BaseNetPalView):
 
     @on(TextAction.Pressed, "#btn-run-recon")
     def _handle_run(self, event: TextAction.Pressed) -> None:
+        self.reveal_widget("#recon-log-panel")
         self._start_recon()
 
     @work(thread=True, exclusive=True, group="recon")
@@ -1450,8 +1478,7 @@ class ReconView(BaseNetPalView):
                 self.app.call_from_thread(log.write, f"[bold red]Error: {exc}[/]")
 
     def _post_scan_refresh(self) -> None:
-        self._populate_targets()
-        self.app.project = self.app.project
+        self.app.refresh_project_state()
 
 
 class ToolsView(BaseNetPalView):
@@ -1467,7 +1494,6 @@ class ToolsView(BaseNetPalView):
         with Horizontal(classes="task-layout"):
             with Vertical(classes="task-form-pane"):
                 with Vertical(classes="form-card"):
-                    yield Static("Tool Execution", classes="panel-title")
                     with DenseFormGrid():
                         with Horizontal():
                             with Vertical():
@@ -1499,7 +1525,7 @@ class ToolsView(BaseNetPalView):
                                 )
                 with ActionBar():
                     yield TextAction("Run Tool", id="btn-run-tool", variant="success")
-                yield Static("", id="tools-status", classes="status-line")
+                yield StatusLine(id="tools-status")
             yield LogPanel("Tool Activity", "tools-log", id="tools-log-panel")
 
     def on_mount(self) -> None:
@@ -1556,6 +1582,7 @@ class ToolsView(BaseNetPalView):
 
     @on(TextAction.Pressed, "#btn-run-tool")
     def _handle_run(self, event: TextAction.Pressed) -> None:
+        self.reveal_widget("#tools-log-panel")
         self._start_tools()
 
     @work(thread=True, exclusive=True, group="tools_run")
@@ -1715,8 +1742,7 @@ class ToolsView(BaseNetPalView):
                 self.app.call_from_thread(log.write, f"[bold red]Error: {exc}[/]")
 
     def _post_run_refresh(self) -> None:
-        self._populate_targets()
-        self.app.project = self.app.project
+        self.app.refresh_project_state()
 
 
 class HostsView(BaseNetPalView):
@@ -1851,7 +1877,7 @@ class FindingsView(BaseNetPalView):
                 with ActionBar(id="findings-action-bar"):
                     yield TextAction("Create Finding", id="btn-create-finding", variant="success")
                 yield SafeDataTable(id="findings-table")
-                yield Static("", id="findings-status", classes="status-line")
+                yield StatusLine(id="findings-status")
             with Vertical(id="finding-detail-pane", classes="detail-pane"):
                 yield Static("Finding Detail", classes="detail-title")
                 yield RichLog(
@@ -1964,14 +1990,13 @@ class EvidenceView(BaseNetPalView):
         with Horizontal(classes="task-layout"):
             with Vertical(classes="task-form-pane"):
                 with Vertical(classes="form-card"):
-                    yield Static("AI Workflow", classes="panel-title")
                     with DenseFormGrid():
                         yield Label("Batch size")
                         yield Input(id="ai-batch", placeholder="5", value="5")
                 with ActionBar():
                     yield TextAction("Run AI Reviewer", id="btn-ai-review", variant="success")
                     yield TextAction("Run AI QA Improvements", id="btn-ai-enhance", variant="warning")
-                yield Static("", id="evidence-status", classes="status-line")
+                yield StatusLine(id="evidence-status")
             yield LogPanel("AI Activity", "evidence-log", id="evidence-log-panel")
 
     def on_mount(self) -> None:
@@ -1982,10 +2007,12 @@ class EvidenceView(BaseNetPalView):
 
     @on(TextAction.Pressed, "#btn-ai-review")
     def _handle_review(self, event: TextAction.Pressed) -> None:
+        self.reveal_widget("#evidence-log-panel")
         self._run_review()
 
     @on(TextAction.Pressed, "#btn-ai-enhance")
     def _handle_enhance(self, event: TextAction.Pressed) -> None:
+        self.reveal_widget("#evidence-log-panel")
         self._run_enhance()
 
     @work(thread=True, exclusive=True, group="ai_review")
@@ -2166,7 +2193,6 @@ class ADScanView(BaseNetPalView):
         with Horizontal(classes="task-layout"):
             with Vertical(classes="task-form-pane"):
                 with Vertical(classes="form-card"):
-                    yield Static("Directory Settings", classes="panel-title")
                     with DenseFormGrid():
                         with Horizontal():
                             with Vertical():
@@ -2218,7 +2244,7 @@ class ADScanView(BaseNetPalView):
                                 yield Input(id="ad-ldap-filter", placeholder="Optional custom query filter")
                 with ActionBar():
                     yield TextAction("Run AD Scan", id="btn-run-ad", variant="success")
-                yield Static("", id="ad-status", classes="status-line")
+                yield StatusLine(id="ad-status")
             yield LogPanel("AD Activity", "ad-log", id="ad-log-panel")
 
     def on_mount(self) -> None:
@@ -2238,6 +2264,7 @@ class ADScanView(BaseNetPalView):
     @on(TextAction.Pressed, "#btn-run-ad")
     def _handle_run(self, event: TextAction.Pressed) -> None:
         if not self._scan_running:
+            self.reveal_widget("#ad-log-panel")
             self._start_ad_scan()
 
     @work(thread=True, exclusive=True, group="ad_scan")
@@ -2356,7 +2383,7 @@ class ADScanView(BaseNetPalView):
                 finally:
                     client.disconnect()
 
-                self.app.call_from_thread(self.app.__setattr__, "project", project)
+                self.app.call_from_thread(self.app.refresh_project_state, project)
             except Exception as exc:
                 self.app.call_from_thread(log.write, f"[bold red]Error: {exc}[/]")
             finally:
@@ -2388,11 +2415,10 @@ class TestCasesView(BaseNetPalView):
                 with ActionBar():
                     yield TextAction("Edit Test Case", id="btn-tc-edit", variant="primary", disabled=True)
                     yield TextAction("Refresh", id="btn-tc-refresh", variant="default")
-                yield Static("", id="tc-status-msg", classes="status-line")
+                yield StatusLine(id="tc-status-msg")
             with Vertical(classes="secondary-pane"):
                 yield DetailPane("Test Case Detail", body_id="tc-detail-panel", id="tc-detail-pane-wrap")
                 with Vertical(classes="form-card compact-form"):
-                    yield Static("CSV Import", classes="panel-title")
                     yield Static(
                         "Import test cases directly from a CSV file. CSV is the only supported testcase source in local-only mode.",
                         classes="info-text",
@@ -2504,6 +2530,7 @@ class TestCasesView(BaseNetPalView):
         self._selected_tc_id = str(event.row_key.value)
         self.query_one("#btn-tc-edit", TextAction).disabled = False
         self._show_detail(self._selected_tc_id)
+        self.reveal_widget("#tc-detail-pane-wrap")
 
     def _show_detail(self, test_case_id: str) -> None:
         project = self.app.project
@@ -2584,13 +2611,14 @@ class SettingsView(BaseNetPalView):
 
     def compose(self) -> ComposeResult:
         yield SectionHeader("Settings", "Edit NetPal JSON files below and save validated content.")
-        with Vertical(classes="pane-box"):
+        with Vertical(id="settings-pane", classes="pane-box"):
             with Horizontal(id="settings-toolbar", classes="compact-form"):
                 with Vertical():
                     yield Label("Config file")
                     yield Select(
                         [
                             ("Primary Config (config.json)", "config.json"),
+                            ("Auto Tool Credentials (creds.json)", "creds.json"),
                             ("Recon Types (recon_types.json)", "recon_types.json"),
                             ("AI Prompts (ai_prompts.json)", "ai_prompts.json"),
                         ],
@@ -2599,7 +2627,7 @@ class SettingsView(BaseNetPalView):
                         allow_blank=False,
                     )
             yield TextArea(id="settings-editor", language="json")
-        yield Static("", id="settings-status", classes="status-line")
+        yield StatusLine(id="settings-status")
         with ActionBar():
             yield TextAction("Save", id="btn-save-settings", variant="success")
             yield TextAction("Reload", id="btn-reload-settings", variant="default")
@@ -2647,6 +2675,9 @@ class SettingsView(BaseNetPalView):
 
         if filename == "config.json" and not isinstance(parsed, dict):
             status.update("[bold red]config.json must be a JSON object (dict).[/]")
+            return
+        if filename == "creds.json" and not isinstance(parsed, list):
+            status.update("[bold red]creds.json must be a JSON list.[/]")
             return
         if filename == "recon_types.json" and not isinstance(parsed, list):
             status.update("[bold red]recon_types.json must be a JSON list.[/]")
@@ -2718,7 +2749,7 @@ class NetPalApp(App):
         loaded = _load_project(name)
         if loaded:
             _load_findings_for_project(loaded)
-        self.project = loaded
+        self.refresh_project_state(loaded)
 
     def on_mount(self) -> None:
         project_name = self.config.get("project_name", "")
@@ -2753,11 +2784,37 @@ class NetPalApp(App):
             class_name = "layout-narrow"
         for target in targets:
             target.add_class(class_name)
+        self._update_nav_labels()
 
     def watch_project(self, old_value, new_value) -> None:
         self._update_nav_state()
         self._update_context_bar()
         self._refresh_active_view(self._current_view)
+
+    def refresh_project_state(self, project=_PROJECT_STATE_UNSET) -> None:
+        """Refresh navigation and active view after in-place project mutations."""
+        if project is not _PROJECT_STATE_UNSET:
+            self.project = project
+        self._update_nav_state()
+        self._update_context_bar()
+        self._refresh_active_view(self._current_view)
+
+    def _nav_labels(self) -> dict[str, str]:
+        width = self.size.width
+        if width >= 120:
+            return VIEW_LABELS
+        if width >= 100:
+            return _MEDIUM_NAV_LABELS
+        return _NARROW_NAV_LABELS
+
+    def _update_nav_labels(self) -> None:
+        labels = self._nav_labels()
+        for view_id in ALL_VIEWS:
+            try:
+                button = self.query_one(f"#nav-{view_id}", TextAction)
+            except Exception:
+                continue
+            button.label = labels.get(view_id, VIEW_LABELS.get(view_id, view_id))
 
     def _allowed_views(self) -> set[str]:
         allowed = {VIEW_PROJECTS, VIEW_SETTINGS}

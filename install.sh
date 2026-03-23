@@ -88,6 +88,8 @@ echo "================================================"
 
 # Track installation status
 NMAP_INSTALLED=false
+NMAP_PRIVILEGED_CONFIGURED=false
+NMAP_PRIVILEGED_MODE="none"
 PLAYWRIGHT_INSTALLED=false
 NUCLEI_INSTALLED=false
 GO_INSTALLED=false
@@ -124,6 +126,73 @@ PY
 
     echo "✗ Playwright installed but Chromium could not be launched"
     return 1
+}
+
+nmap_has_linux_capabilities() {
+    local nmap_path="$1"
+    if ! command -v getcap &> /dev/null; then
+        return 1
+    fi
+
+    local cap_output
+    cap_output=$(getcap "$nmap_path" 2>/dev/null || true)
+    [[ "$cap_output" == *"cap_net_raw"* || "$cap_output" == *"cap_net_admin"* ]]
+}
+
+install_setcap_tooling() {
+    if command -v setcap &> /dev/null; then
+        return 0
+    fi
+
+    echo "[INFO] setcap not found. Installing Linux capability tooling..."
+    if command -v apt-get &> /dev/null; then
+        sudo apt-get update && sudo apt-get install -y libcap2-bin
+    elif command -v yum &> /dev/null; then
+        sudo yum install -y libcap
+    elif command -v dnf &> /dev/null; then
+        sudo dnf install -y libcap
+    fi
+
+    command -v setcap &> /dev/null
+}
+
+configure_privileged_nmap() {
+    local nmap_path
+    nmap_path=$(command -v nmap 2>/dev/null || true)
+    if [[ -z "$nmap_path" ]]; then
+        echo "✗ nmap is not installed yet"
+        return 1
+    fi
+
+    if [[ "$OS" != "linux" ]]; then
+        echo "[INFO] Linux file capabilities are only available on Linux."
+        return 1
+    fi
+
+    if nmap_has_linux_capabilities "$nmap_path"; then
+        echo "✓ nmap already has Linux capabilities configured"
+        NMAP_PRIVILEGED_CONFIGURED=true
+        NMAP_PRIVILEGED_MODE="capabilities"
+        return 0
+    fi
+
+    if ! install_setcap_tooling; then
+        echo "✗ Unable to install setcap tooling on this system"
+        return 1
+    fi
+
+    echo "[INFO] Configuring Linux capabilities on nmap so NetPal can run SYN scans without sudo..."
+    if ! sudo setcap cap_net_raw,cap_net_admin,cap_net_bind_service+eip "$nmap_path"; then
+        echo "✗ Failed to set Linux capabilities on $nmap_path"
+        return 1
+    fi
+
+    if command -v getcap &> /dev/null; then
+        echo "✓ $(getcap "$nmap_path")"
+    fi
+    NMAP_PRIVILEGED_CONFIGURED=true
+    NMAP_PRIVILEGED_MODE="capabilities"
+    return 0
 }
 
 install_go() {
@@ -210,6 +279,25 @@ else
         if command -v nmap &> /dev/null; then
             echo "✓ nmap installed: $(nmap --version | head -1)"
             NMAP_INSTALLED=true
+        fi
+    fi
+fi
+
+if [[ "$NMAP_INSTALLED" == true && "$OS" == "linux" ]]; then
+    echo ""
+    NMAP_PATH=$(command -v nmap)
+    if nmap_has_linux_capabilities "$NMAP_PATH"; then
+        echo "✓ nmap already has Linux capabilities configured"
+        NMAP_PRIVILEGED_CONFIGURED=true
+        NMAP_PRIVILEGED_MODE="capabilities"
+    else
+        echo "[INFO] NetPal can configure privileged nmap so scans do not prompt for a sudo password."
+        read -p "Configure Linux capabilities for nmap? (Y/N): " -n 1 -r
+        echo
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            if ! configure_privileged_nmap; then
+                echo "○ Capability setup failed or was skipped. NetPal can still use passwordless sudo instead."
+            fi
         fi
     fi
 fi
@@ -328,11 +416,14 @@ if [ "$NMAP_INSTALLED" = true ]; then
         exit 1
     fi
 
-    # ── Passwordless sudo for nmap and chown ──────────────────────────────────
+    # ── Privileged nmap / passwordless sudo fallback ──────────────────────────
 
     if [ "$(id -u)" -eq 0 ]; then
         echo ""
-        echo "[INFO] Running as root — passwordless sudo configuration not needed."
+        echo "[INFO] Running as root — extra nmap privilege configuration is not needed."
+    elif [[ "$NMAP_PRIVILEGED_CONFIGURED" == true ]]; then
+        echo ""
+        echo "[INFO] nmap Linux capabilities are configured — passwordless sudo is not required."
     else
         echo ""
         echo "================================================"
@@ -341,7 +432,7 @@ if [ "$NMAP_INSTALLED" = true ]; then
         echo ""
         NMAP_PATH=$(which nmap)
         CHOWN_PATH=$(which chown)
-        echo "NetPal requires passwordless sudo access to:"
+        echo "Linux capabilities were not configured, so NetPal will fall back to passwordless sudo:"
         echo "  • nmap   ($NMAP_PATH) — SYN scans require root privileges"
         echo "  • chown  ($CHOWN_PATH) — restore file ownership after sudo nmap"
         echo ""
@@ -375,7 +466,11 @@ if [ "$NMAP_INSTALLED" = true ]; then
     echo "================================================"
     echo ""
     echo "Required tools:"
-    echo "  ✓ nmap installed"
+    if [[ "$NMAP_PRIVILEGED_MODE" == "capabilities" ]]; then
+        echo "  ✓ nmap installed (Linux capabilities configured)"
+    else
+        echo "  ✓ nmap installed"
+    fi
     echo "  ✓ playwright installed (Chromium browser)"
     echo ""
     echo "Optional tools:"

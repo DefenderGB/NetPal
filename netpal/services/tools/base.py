@@ -5,6 +5,8 @@ Provides the abstract base class for all security tool runners and
 a standardized result format for tool execution outcomes.
 """
 import os
+import re
+import shlex
 import subprocess
 import time
 from abc import ABC, abstractmethod
@@ -13,7 +15,7 @@ from ...models.host import Host
 from ...models.service import Service
 from ...models.finding import Finding
 from ...utils.persistence.file_utils import ensure_dir, get_scan_results_dir, chown_to_user
-from ...utils.naming_utils import sanitize_ip_for_filename
+from ...utils.naming_utils import sanitize_ip_for_filename, validate_shell_safe
 from ...utils.config_loader import get_user_agent
 from ...utils.tool_paths import get_go_tool_path
 
@@ -180,7 +182,7 @@ class BaseToolRunner(ABC):
             Filename string like 'auto_playwright_192-168-1-1_80_1707753600.txt'
         """
         safe_ip = sanitize_ip_for_filename(host_ip)
-        timestamp = int(time.time())
+        timestamp = time.time_ns()
         ext = extension if extension.startswith('.') else f'.{extension}'
         return f"{tool_prefix}_{safe_ip}_{port}_{timestamp}{ext}"
     
@@ -204,7 +206,148 @@ class BaseToolRunner(ABC):
             Full path to tool binary, or tool name if not found in GO bin
         """
         return get_go_tool_path(tool_name)
-    
+
+    @staticmethod
+    def _resolve_ad_domain(host: Host, project_domain: Optional[str] = None) -> str:
+        """Resolve the best AD domain value for a host/tool execution."""
+        host_domain = ""
+        if isinstance(getattr(host, "metadata", None), dict):
+            host_domain = str(host.metadata.get("ad_domain", "") or "").strip()
+
+        if host_domain:
+            return host_domain
+
+        return str(project_domain or "").strip()
+
+    @staticmethod
+    def _format_command_for_display(args: list[str]) -> str:
+        """Return a shell-safe display string for an argv list."""
+        return " ".join(shlex.quote(arg) for arg in args)
+
+    def _render_command_args(
+        self,
+        command_template: str,
+        host: Host,
+        service: Service,
+        output_path: Optional[str] = None,
+        project_domain: Optional[str] = None,
+        credential: Optional[dict] = None,
+        mask_secrets: bool = False,
+    ) -> list[str]:
+        """Expand auto-tool placeholders into a subprocess argv list."""
+        if not command_template:
+            raise ValueError("No command specified in tool config")
+
+        if "{path}" in command_template and not output_path:
+            raise ValueError(
+                "Auto-tool command uses {path} but no output path was provided"
+            )
+
+        safe_ip = validate_shell_safe(host.ip, "IP address")
+        safe_port = validate_shell_safe(str(service.port), "port")
+        safe_protocol = validate_shell_safe(service.get_protocol(), "protocol")
+
+        safe_domain = ""
+        domain_parts: list[str] = []
+        uses_domain_placeholders = (
+            "{domain}" in command_template
+            or "{domain_dn}" in command_template
+            or re.search(r"\{domain(\d+)\}", command_template) is not None
+        )
+        if uses_domain_placeholders:
+            domain = self._resolve_ad_domain(host, project_domain)
+            if not domain:
+                raise ValueError(
+                    "This auto-tool requires an AD domain. Set the project's AD domain "
+                    "with netpal project-edit or scan a host that exposes LDAP/SMB "
+                    "domain metadata first."
+                )
+
+            safe_domain = validate_shell_safe(domain, "domain")
+            domain_parts = [
+                validate_shell_safe(part, f"domain segment {idx}")
+                for idx, part in enumerate(safe_domain.split("."))
+                if part
+            ]
+            if not domain_parts:
+                raise ValueError(f"Unable to split AD domain into labels: {domain!r}")
+
+        uses_credential_placeholders = (
+            "{username}" in command_template or "{password}" in command_template
+        )
+        if uses_credential_placeholders and credential is None:
+            raise ValueError(
+                "This auto-tool requires credentials. Add enabled entries to "
+                "netpal/config/creds.json first."
+            )
+
+        username = ""
+        password = ""
+        if credential:
+            username = str(credential.get("username", "") or "")
+            password = str(credential.get("password", "") or "")
+
+        values = {
+            "ip": safe_ip,
+            "port": safe_port,
+            "protocol": safe_protocol,
+            "path": output_path or "",
+            "domain": safe_domain,
+            "domain_dn": ",".join(f"dc={part}" for part in domain_parts),
+            "username": username,
+            "password": "***" if mask_secrets and password else password,
+        }
+
+        try:
+            template_args = shlex.split(command_template)
+        except ValueError as e:
+            raise ValueError(f"Failed to parse command template: {e}") from e
+
+        rendered_args = []
+        for token in template_args:
+            has_domain_index = re.search(r"\{domain(\d+)\}", token) is not None
+            rendered = token
+            for key, value in values.items():
+                rendered = rendered.replace(f"{{{key}}}", value)
+
+            def _replace_domain_index(match: re.Match[str]) -> str:
+                idx = int(match.group(1))
+                if idx >= len(domain_parts):
+                    raise ValueError(
+                        f"Placeholder {{domain{idx}}} requested, but domain "
+                        f"{safe_domain!r} only has {len(domain_parts)} part(s)"
+                    )
+                return domain_parts[idx]
+
+            if has_domain_index:
+                rendered = re.sub(r"\{domain(\d+)\}", _replace_domain_index, rendered)
+            rendered_args.append(rendered)
+
+        return rendered_args
+
+    def _render_command_template(
+        self,
+        command_template: str,
+        host: Host,
+        service: Service,
+        output_path: Optional[str] = None,
+        project_domain: Optional[str] = None,
+        credential: Optional[dict] = None,
+        mask_secrets: bool = False,
+    ) -> str:
+        """Expand auto-tool placeholders into a display-safe command string."""
+        return self._format_command_for_display(
+            self._render_command_args(
+                command_template,
+                host,
+                service,
+                output_path=output_path,
+                project_domain=project_domain,
+                credential=credential,
+                mask_secrets=mask_secrets,
+            )
+        )
+
     def _run_subprocess(
         self,
         cmd: list,

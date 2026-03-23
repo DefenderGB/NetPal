@@ -1,6 +1,8 @@
 """
 Nmap XML output parser
 """
+import re
+
 import xmltodict
 from ..models.host import Host
 from ..models.service import Service
@@ -8,6 +10,8 @@ from ..models.service import Service
 
 class NmapXmlParser:
     """Parses nmap XML output into Host objects."""
+
+    DIRECTORY_SERVICE_NAMES = {"ldap", "microsoft-ds"}
     
     @staticmethod
     def parse_xml_file(xml_path, network_id="unknown"):
@@ -127,6 +131,7 @@ class NmapXmlParser:
                     service = NmapXmlParser._parse_port_data(port_data)
                     if service:
                         host.add_service(service)
+                    NmapXmlParser._enrich_host_from_service_data(host, port_data.get('service', {}))
                 if port_list and not host.services:
                     return None
             
@@ -135,7 +140,45 @@ class NmapXmlParser:
         except Exception as e:
             print(f"Error parsing host data: {e}")
             return None
-    
+
+    @staticmethod
+    def _enrich_host_from_service_data(host, service_data):
+        """Promote useful LDAP/SMB banner details into host metadata."""
+        if not host or not isinstance(service_data, dict):
+            return
+
+        service_name = (service_data.get('@name') or '').strip().lower()
+        if service_name not in NmapXmlParser.DIRECTORY_SERVICE_NAMES:
+            return
+
+        hostname = (service_data.get('@hostname') or '').strip()
+        if hostname and not host.hostname:
+            host.hostname = hostname
+
+        ostype = (service_data.get('@ostype') or '').strip()
+        if ostype:
+            if not host.os:
+                host.os = ostype
+            host.merge_metadata({"ostype": ostype})
+
+        if service_name == "microsoft-ds":
+            product = (service_data.get('@product') or '').strip()
+            if product:
+                host.merge_metadata({"product": product})
+
+        domain = NmapXmlParser._extract_domain_from_extrainfo(service_data.get('@extrainfo', ''))
+        if domain:
+            host.merge_metadata({"ad_domain": domain})
+
+    @staticmethod
+    def _extract_domain_from_extrainfo(extrainfo):
+        """Extract an Active Directory domain from nmap service extrainfo."""
+        if not extrainfo:
+            return ""
+
+        match = re.search(r"\bDomain:\s*([^,]+)", extrainfo, flags=re.IGNORECASE)
+        return match.group(1).strip() if match else ""
+
     @staticmethod
     def _parse_port_data(port_data):
         """

@@ -38,6 +38,8 @@ def _load_settings_document(filename: str):
 
     if filename == "config.json":
         return ConfigLoader.load_config_json()
+    if filename == "creds.json":
+        return ConfigLoader.load_auto_tool_credentials()
     if filename == "recon_types.json":
         return ConfigLoader.load_recon_types()
     if filename == "ai_prompts.json":

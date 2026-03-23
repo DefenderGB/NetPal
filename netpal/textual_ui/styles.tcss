@@ -14,7 +14,7 @@ Screen {
 
 #view-bar {
     dock: top;
-    height: 3;
+    height: 2;
     padding: 0 1;
     background: #172033;
     layout: horizontal;
@@ -22,8 +22,8 @@ Screen {
 }
 
 #view-bar .text-action {
-    min-width: 11;
-    height: 3;
+    min-width: 0;
+    height: 1;
     margin: 0 1 0 0;
     padding: 0 1;
     background: #1b2740;
@@ -41,6 +41,15 @@ Screen {
     color: #64748b;
 }
 
+#view-bar .text-action:last-child {
+    margin: 0;
+}
+
+.layout-medium #view-bar .text-action,
+.layout-narrow #view-bar .text-action {
+    padding: 0 1;
+}
+
 #main-switcher {
     height: 1fr;
 }
@@ -52,7 +61,7 @@ Screen {
 .section-intro-row {
     width: 1fr;
     height: auto;
-    margin: 0 0 1 0;
+    margin: 0;
 }
 
 .section-intro-title {
@@ -75,7 +84,7 @@ Screen {
 .panel-title {
     color: #60a5fa;
     text-style: bold;
-    margin: 0 0 1 0;
+    margin: 0;
 }
 
 .info-text {
@@ -84,7 +93,7 @@ Screen {
 
 .metric-strip {
     height: auto;
-    margin: 0 0 1 0;
+    margin: 0;
     padding: 0 1;
     background: #162032;
     color: #cbd5e1;
@@ -107,6 +116,11 @@ Screen {
     min-width: 28;
 }
 
+.split-layout > .detail-pane {
+    width: 40%;
+    min-width: 28;
+}
+
 .task-layout {
     layout: horizontal;
     height: 1fr;
@@ -123,22 +137,27 @@ Screen {
     min-width: 28;
 }
 
+.task-layout > .pane-box {
+    width: 40%;
+    min-width: 24;
+}
+
 .pane-box {
     height: 1fr;
-    padding: 1 1;
+    padding: 0 1;
     background: #172033;
     border: solid #2a3952;
 }
 
 .detail-pane {
     height: 1fr;
-    padding: 1 1;
+    padding: 0 1;
     background: #172033;
     border: solid #2a3952;
 }
 
 .detail-title {
-    margin: 0 0 1 0;
+    margin: 0;
     color: #60a5fa;
     text-style: bold;
 }
@@ -269,23 +288,23 @@ Select > SelectOverlay > .option-list--option {
 
 .action-bar {
     height: auto;
-    margin: 1 0 0 0;
+    margin: 0;
 }
 
 .action-bar .text-action {
     margin: 0 1 0 0;
-    min-width: 12;
+    min-width: 10;
     height: 1;
 }
 
 .status-line {
     height: auto;
-    margin: 1 0 0 0;
+    margin: 0;
     color: #94a3b8;
 }
 
 .status-block {
-    margin: 1 0 0 0;
+    margin: 0;
 }
 
 .dense-form-grid {
@@ -299,26 +318,34 @@ Select > SelectOverlay > .option-list--option {
 
 .dense-form-grid > Horizontal > Vertical {
     min-width: 0;
-    margin: 0 2 0 0;
+    margin: 0 1 0 0;
+}
+
+.dense-form-grid > Horizontal > Vertical:last-child {
+    margin: 0;
 }
 
 .form-card {
     height: auto;
-    padding: 1 1;
-    margin: 0 0 1 0;
+    padding: 0 1;
+    margin: 0;
     background: #172033;
     border: solid #2a3952;
 }
 
 .compact-form Label {
-    margin: 1 0 1 0;
+    margin: 0;
     padding: 0;
     color: #cbd5e1;
 }
 
 .compact-form > Horizontal > Vertical {
     min-width: 0;
-    margin: 0 2 0 0;
+    margin: 0 1 0 0;
+}
+
+.compact-form > Horizontal > Vertical:last-child {
+    margin: 0;
 }
 
 .compact-form Input,
@@ -344,7 +371,7 @@ Select > SelectOverlay > .option-list--option {
 }
 
 .compact-form TextArea {
-    min-height: 5;
+    min-height: 4;
 }
 
 .compact-form Horizontal,
@@ -376,13 +403,24 @@ RichLog {
 
 #findings-action-bar {
     height: auto;
-    margin: 1 0 0 0;
+    margin: 0;
 }
 
 #findings-table {
+    height: 10;
+    min-height: 10;
+    max-height: 10;
+}
+
+#hosts-table {
     height: auto;
     min-height: 8;
-    max-height: 30%;
+}
+
+#proj-table,
+#asset-table {
+    height: auto;
+    min-height: 8;
 }
 
 #finding-detail-panel {
@@ -433,7 +471,7 @@ RichLog {
 }
 
 .modal-shell .action-bar {
-    margin-top: 1;
+    margin-top: 0;
 }
 
 .modal-message {
@@ -475,33 +513,74 @@ RichLog {
     height: 6;
 }
 
-.layout-medium .split-layout,
-.layout-medium .task-layout,
 .layout-narrow .split-layout,
 .layout-narrow .task-layout {
     layout: vertical;
 }
 
-.layout-medium .primary-pane,
-.layout-medium .secondary-pane,
-.layout-medium .task-form-pane,
-.layout-medium .task-log-pane,
 .layout-narrow .primary-pane,
 .layout-narrow .secondary-pane,
 .layout-narrow .task-form-pane,
-.layout-narrow .task-log-pane {
+.layout-narrow .task-log-pane,
+.layout-narrow .split-layout > .detail-pane,
+.layout-narrow .task-layout > .pane-box {
     width: 1fr;
     height: auto;
     min-height: 0;
     margin: 0 0 1 0;
 }
 
-.layout-medium .detail-pane,
-.layout-medium .pane-box,
+.layout-medium .primary-pane,
+.layout-medium .task-form-pane {
+    width: 56%;
+}
+
+.layout-medium .secondary-pane,
+.layout-medium .task-log-pane {
+    width: 44%;
+    min-width: 24;
+}
+
+.layout-medium .split-layout > .detail-pane,
+.layout-medium .task-layout > .pane-box {
+    width: 44%;
+    min-width: 24;
+}
+
+.layout-medium #findings-table {
+    height: 9;
+    min-height: 9;
+    max-height: 9;
+}
+
 .layout-narrow .detail-pane,
 .layout-narrow .pane-box {
     height: auto;
     max-height: 18;
+}
+
+.layout-narrow #hosts-table {
+    height: 10;
+    min-height: 10;
+}
+
+.layout-narrow #proj-table,
+.layout-narrow #asset-table,
+.layout-narrow #findings-table {
+    height: 9;
+    min-height: 9;
+    max-height: 9;
+}
+
+.layout-narrow #proj-detail-pane,
+.layout-narrow #asset-detail-pane,
+.layout-narrow #finding-detail-pane,
+.layout-narrow #hosts-detail-pane,
+.layout-narrow .task-layout > .pane-box:last-child,
+.layout-narrow #settings-pane {
+    height: 1fr;
+    min-height: 10;
+    max-height: 1fr;
 }
 
 Footer {

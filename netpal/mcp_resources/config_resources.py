@@ -1,4 +1,4 @@
-"""MCP resources for configuration — config, exploit tools."""
+"""MCP resources for configuration — config, exploit tools, creds."""
 from mcp.server.fastmcp import Context
 
 
@@ -43,3 +43,20 @@ def register_config_resources(mcp):
         """
         from ..utils.config_loader import ConfigLoader
         return ConfigLoader.load_exploit_tools()
+
+    @mcp.resource("netpal://config/creds")
+    def get_auto_tool_creds(ctx: Context) -> list:
+        """Auto-tool credentials from creds.json with passwords masked."""
+        from ..utils.config_loader import ConfigLoader
+
+        masked = []
+        for entry in ConfigLoader.load_auto_tool_credentials():
+            if not isinstance(entry, dict):
+                continue
+            masked.append({
+                "username": entry.get("username", ""),
+                "password": "***" if entry.get("password") else "",
+                "type": entry.get("type", ""),
+                "use_in_auto_tools": bool(entry.get("use_in_auto_tools", False)),
+            })
+        return masked

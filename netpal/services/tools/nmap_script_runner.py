@@ -8,15 +8,15 @@ import os
 from .base import BaseToolRunner, ToolExecutionResult
 from ...models.host import Host
 from ...models.service import Service
-from ...utils.naming_utils import sanitize_for_filename, validate_shell_safe
+from ...utils.naming_utils import sanitize_for_filename
+from ...utils.validation import get_nmap_base_command
 
 
 class NmapScriptRunner(BaseToolRunner):
     """Runs custom nmap scripts from exploit tools configuration.
     
-    Supports command templates with {ip} and {port} placeholders,
-    and automatically injects user-agent script arguments for
-    nmap HTTP scripts.
+    Supports shared auto-tool command placeholders and automatically
+    injects user-agent script arguments for nmap HTTP scripts.
     
     Args:
         project_id: Project UUID for output paths
@@ -50,7 +50,9 @@ class NmapScriptRunner(BaseToolRunner):
         service: Service,
         asset_identifier: str,
         callback=None,
-        tool_config: dict = None
+        tool_config: dict = None,
+        project_domain: str = None,
+        credential: dict = None,
     ) -> ToolExecutionResult:
         """Run a custom nmap script against a service.
         
@@ -78,31 +80,57 @@ class NmapScriptRunner(BaseToolRunner):
         # Build command from template
         command_template = tool_config.get('command', '')
         try:
-            safe_ip = validate_shell_safe(host.ip, "IP address")
-            safe_port = validate_shell_safe(str(service.port), "port")
+            command = self._render_command_args(
+                command_template,
+                host,
+                service,
+                output_path=output_file,
+                project_domain=project_domain,
+                credential=credential,
+            )
+            display_args = self._render_command_args(
+                command_template,
+                host,
+                service,
+                output_path=output_file,
+                project_domain=project_domain,
+                credential=credential,
+                mask_secrets=True,
+            )
         except ValueError as e:
             return ToolExecutionResult.error_result(str(e))
-        command = command_template.replace('{ip}', safe_ip).replace('{port}', safe_port)
         
         # Add user-agent for nmap HTTP scripts
         user_agent = self._get_user_agent()
-        if user_agent and 'nmap' in command.lower():
-            safe_ua = user_agent.replace('"', '\\"')
-            script_args = f"""--script-args 'http.useragent="{safe_ua}"'"""
-            command = command.replace('nmap ', f'nmap {script_args} ', 1)
-        
-        # Prepend sudo for nmap commands (nmap requires root for SYN scans)
-        if 'nmap' in command.split()[0].lower():
-            command = f'sudo {command}'
+        if user_agent:
+            for arg_list in (command, display_args):
+                for idx, token in enumerate(arg_list):
+                    if os.path.basename(token).lower() == "nmap":
+                        arg_list[idx + 1:idx + 1] = [
+                            "--script-args",
+                            f"http.useragent={user_agent}",
+                        ]
+                        break
+
+        if command:
+            first = os.path.basename(command[0]).lower()
+            if first == "sudo" and len(command) > 1 and os.path.basename(command[1]).lower() == "nmap":
+                command = get_nmap_base_command() + command[2:]
+                display_args = get_nmap_base_command() + display_args[2:]
+            elif first == "nmap":
+                command = get_nmap_base_command() + command[1:]
+                display_args = get_nmap_base_command() + display_args[1:]
+
+        display_command = self._format_command_for_display(display_args)
         
         try:
             if callback:
-                callback(f"[NMAP SCRIPT] {command}\n")
+                callback(f"[NMAP SCRIPT] {display_command}\n")
             
-            result = self._run_subprocess(command, timeout=300, shell=True)
+            result = self._run_subprocess(command, timeout=300, shell=False)
             
             # Save output
-            self._write_command_output(output_file, command, result.stdout, result.stderr)
+            self._write_command_output(output_file, display_command, result.stdout, result.stderr)
             
             # Restore file ownership after sudo nmap
             self._chown_to_user(output_file)

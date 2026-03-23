@@ -39,7 +39,7 @@ def register_scan_tools(mcp):
     ) -> dict:
         """Run a reconnaissance scan (nmap) against project assets or hosts.
 
-        Requires nmap and passwordless sudo to be available on the host.
+        Requires nmap and a working privileged execution path on the host.
 
         Target modes (pick one):
           - asset: Scan a named asset's full range
@@ -84,7 +84,7 @@ def register_scan_tools(mcp):
         nctx = get_netpal_ctx(ctx)
 
         if not nctx.sudo_available:
-            raise RuntimeError("Passwordless sudo for nmap is not configured.")
+            raise RuntimeError("Privileged nmap execution is not configured.")
         if not nctx.nmap_available:
             raise RuntimeError("nmap is not installed or not found in PATH.")
         if not check_playwright_installed():

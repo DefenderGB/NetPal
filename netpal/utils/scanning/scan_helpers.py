@@ -183,8 +183,7 @@ def _deduplicate_hosts_by_identity(hosts):
             existing.hostname = host.hostname
         if not existing.os and host.os:
             existing.os = host.os
-        if getattr(host, "metadata", None):
-            existing.metadata.update(host.metadata)
+        existing.merge_metadata(getattr(host, "metadata", None))
     return deduped
 
 
@@ -428,15 +427,30 @@ def run_exploit_tools_on_hosts(tool_runner, hosts, asset, exploit_tools, project
         playwright_only: When True, only run Playwright on HTTP/HTTPS
             services (skip Nuclei, nmap scripts, and HTTP tools).
     """
+    auto_tool_credentials = ConfigLoader.load_auto_tool_credentials()
+
     for host in hosts:
+        project_host = project.get_host_by_identity(host.ip, getattr(host, "network_id", "unknown"))
+        host_proof_types_by_port = {}
+        if project_host:
+            for svc in project_host.services:
+                host_proof_types_by_port[svc.port] = {
+                    proof.get("type")
+                    for proof in (svc.proofs or [])
+                    if proof.get("type")
+                }
+
         for service in host.services:
             # Look up existing proofs from the project copy of this service
             existing_proofs = None
-            project_host = project.get_host_by_identity(host.ip, getattr(host, "network_id", "unknown"))
             if project_host:
                 project_service = project_host.get_service(service.port)
                 if project_service:
                     existing_proofs = project_service.proofs
+            host_existing_other_service_proof_types = set()
+            for proof_port, proof_types in host_proof_types_by_port.items():
+                if proof_port != service.port:
+                    host_existing_other_service_proof_types.update(proof_types)
 
             # Run exploit tools
             results = tool_runner.execute_tools_for_service(
@@ -447,6 +461,9 @@ def run_exploit_tools_on_hosts(tool_runner, hosts, asset, exploit_tools, project
                 callback,
                 rerun_autotools=rerun_autotools,
                 existing_proofs=existing_proofs,
+                project_domain=getattr(project, "ad_domain", ""),
+                auto_tool_credentials=auto_tool_credentials,
+                host_existing_other_service_proof_types=host_existing_other_service_proof_types,
                 playwright_only=playwright_only,
             )
             
@@ -469,6 +486,7 @@ def run_exploit_tools_on_hosts(tool_runner, hosts, asset, exploit_tools, project
                             response_file=response_file,
                             http_file=http_file,
                         )
+                        host_proof_types_by_port.setdefault(service.port, set()).add(proof_type)
                         
                         # Add findings to host
                         for finding in findings:

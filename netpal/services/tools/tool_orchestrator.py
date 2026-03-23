@@ -5,12 +5,14 @@ Manages the execution of multiple security tools against discovered
 services, handling tool matching, Playwright dependency for HTTP tools,
 and result collection.
 """
+import hashlib
 import re
 import time
 from typing import List, Tuple, Optional
 from .playwright_runner import PlaywrightRunner
 from .nuclei_runner import NucleiRunner
 from .nmap_script_runner import NmapScriptRunner
+from .command_tool_runner import CommandToolRunner
 from .http_tool_runner import HttpCustomToolRunner
 from ...models.host import Host
 from ...models.service import Service
@@ -23,7 +25,8 @@ class ToolOrchestrator:
     Manages the tool execution workflow:
     1. Run Playwright first for web services (provides response data)
     2. Match configured exploit tools against service port/name
-    3. Execute matching tools in order (nmap_custom, http_custom, nuclei)
+    3. Execute matching tools in order (nmap_custom, command_custom,
+       http_custom, nuclei)
     4. Collect and return all results
     
     Args:
@@ -38,6 +41,7 @@ class ToolOrchestrator:
         self.playwright = PlaywrightRunner(project_id, config)
         self.nuclei = NucleiRunner(project_id, config)
         self.nmap_script = NmapScriptRunner(project_id, config)
+        self.command_custom = CommandToolRunner(project_id, config)
         self.http_custom = HttpCustomToolRunner(project_id, config)
     
     def execute_tools_for_service(
@@ -49,6 +53,9 @@ class ToolOrchestrator:
         callback=None,
         rerun_autotools: str = "2",
         existing_proofs: Optional[List[dict]] = None,
+        project_domain: Optional[str] = None,
+        auto_tool_credentials: Optional[List[dict]] = None,
+        host_existing_other_service_proof_types: Optional[set[str]] = None,
         playwright_only: bool = False,
     ) -> List[Tuple[str, Optional[str], Optional[str], list]]:
         """Execute all applicable tools for a service.
@@ -69,6 +76,13 @@ class ToolOrchestrator:
             existing_proofs: Proofs already recorded on the *project* copy of
                 this service.  Used together with *rerun_autotools* to decide
                 whether to skip a tool that has already produced output.
+            project_domain: Project-level AD domain fallback for domain-aware
+                command placeholders such as ``{domain}`` and ``{domain_dn}``.
+            auto_tool_credentials: Credentials loaded from ``creds.json`` for
+                tools that use ``{username}`` and ``{password}`` placeholders.
+            host_existing_other_service_proof_types: Proof types already
+                recorded on other services for this same host. Used with
+                ``dup_run`` to optionally suppress duplicate host-level runs.
             playwright_only: When True, only run Playwright on HTTP/HTTPS
                 services and skip all other exploit tools.
             
@@ -117,22 +131,46 @@ class ToolOrchestrator:
         )
         
         for tool in matching_tools:
-            tool_name = tool.get('tool_name', 'Unknown')
-            safe_tool_name = sanitize_for_filename(tool_name)
-            tool_type = tool.get('tool_type', '')
-            proof_type = self._proof_type_for_tool(tool_type, safe_tool_name, tool)
-
-            if self._should_skip_tool(proof_type, rerun_autotools, existing_proofs):
+            tool_runs = self._build_tool_runs(tool, auto_tool_credentials or [])
+            if not tool_runs:
                 if callback:
-                    callback(f"\n[SKIP] {tool_name} already ran on {host.ip}:{service.port} (rerun_autotools={rerun_autotools})\n")
+                    cred_type = self._normalize_credential_type(tool.get("cred_type", "")) or "all"
+                    callback(
+                        f"\n[ERROR] {tool.get('tool_name', 'Unknown')} skipped on "
+                        f"{host.ip}:{service.port}: no matching auto-tool credentials "
+                        f"available (cred_type={cred_type})\n"
+                    )
                 continue
 
-            tool_result = self._execute_configured_tool(
-                tool, host, service, asset_identifier,
-                pw_result_file, callback
-            )
-            if tool_result:
-                results.append(tool_result)
+            for run_tool in tool_runs:
+                tool_name = self._tool_run_label(run_tool)
+                safe_tool_name = sanitize_for_filename(run_tool.get('tool_name', 'Unknown'))
+                tool_type = run_tool.get('tool_type', '')
+                proof_type = self._proof_type_for_tool(tool_type, safe_tool_name, run_tool)
+
+                if self._should_skip_tool(proof_type, rerun_autotools, existing_proofs):
+                    if callback:
+                        callback(f"\n[SKIP] {tool_name} already ran on {host.ip}:{service.port} (rerun_autotools={rerun_autotools})\n")
+                    continue
+
+                if (
+                    not self._boolish(run_tool.get("dup_run", True))
+                    and proof_type in (host_existing_other_service_proof_types or set())
+                ):
+                    if callback:
+                        callback(
+                            f"\n[SKIP] {tool_name} skipped on {host.ip}:{service.port}: "
+                            f"dup_run=false and this tool already ran on another "
+                            f"matched service for this host\n"
+                        )
+                    continue
+
+                tool_result = self._execute_configured_tool(
+                    run_tool, host, service, asset_identifier,
+                    pw_result_file, callback, project_domain
+                )
+                if tool_result:
+                    results.append(tool_result)
         
         return results
 
@@ -146,15 +184,99 @@ class ToolOrchestrator:
         ``nuclei_template``, the proof type uses the ``nuclei_`` prefix
         because the run is delegated to the nuclei runner.
         """
+        suffix = ""
+        if tool_config and tool_config.get("_credential_key"):
+            suffix = f"__cred_{tool_config['_credential_key']}"
+
         if tool_type == 'nmap_custom':
-            return f"nmap_{safe_tool_name}"
+            return f"nmap_{safe_tool_name}{suffix}"
+        elif tool_type == 'command_custom':
+            return f"command_{safe_tool_name}{suffix}"
         elif tool_type == 'http_custom':
             if tool_config and tool_config.get('nuclei_template'):
-                return f"nuclei_{safe_tool_name}"
-            return f"http_{safe_tool_name}"
+                return f"nuclei_{safe_tool_name}{suffix}"
+            return f"http_{safe_tool_name}{suffix}"
         elif tool_type == 'nuclei':
-            return f"nuclei_{safe_tool_name}"
-        return safe_tool_name
+            return f"nuclei_{safe_tool_name}{suffix}"
+        return f"{safe_tool_name}{suffix}"
+
+    @staticmethod
+    def _normalize_credential_type(value: str) -> str:
+        """Normalize a credential type to '', 'domain', or 'web'."""
+        normalized = str(value or "").strip().lower()
+        return normalized if normalized in {"domain", "web"} else ""
+
+    @staticmethod
+    def _boolish(value) -> bool:
+        """Interpret common JSON-edited truthy values."""
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+        return bool(value)
+
+    @classmethod
+    def _normalize_auto_tool_credential(cls, credential: dict | None) -> Optional[dict]:
+        """Normalize a credential record from creds.json."""
+        if not isinstance(credential, dict):
+            return None
+
+        username = str(credential.get("username", "") or "")
+        password = str(credential.get("password", "") or "")
+        cred_type = cls._normalize_credential_type(credential.get("type", ""))
+        use_in_auto_tools = cls._boolish(credential.get("use_in_auto_tools", False))
+
+        if not use_in_auto_tools or not username or not password or not cred_type:
+            return None
+
+        digest = hashlib.sha256(
+            f"{cred_type}\0{username}\0{password}".encode("utf-8")
+        ).hexdigest()[:12]
+
+        return {
+            "username": username,
+            "password": password,
+            "type": cred_type,
+            "use_in_auto_tools": True,
+            "_credential_key": digest,
+            "_credential_label": f"{cred_type}:{username}",
+        }
+
+    @staticmethod
+    def _tool_uses_credentials(tool: dict) -> bool:
+        """Return True when a tool command references credential placeholders."""
+        command = str(tool.get("command", "") or "")
+        return "{username}" in command or "{password}" in command
+
+    @classmethod
+    def _build_tool_runs(cls, tool: dict, credentials: List[dict]) -> List[dict]:
+        """Expand a tool into one or more execution configs."""
+        if not cls._tool_uses_credentials(tool):
+            return [tool]
+
+        desired_type = cls._normalize_credential_type(tool.get("cred_type", ""))
+        runs = []
+        for credential in credentials:
+            normalized = cls._normalize_auto_tool_credential(credential)
+            if not normalized:
+                continue
+            if desired_type and normalized["type"] != desired_type:
+                continue
+
+            tool_run = dict(tool)
+            tool_run["_credential"] = normalized
+            tool_run["_credential_key"] = normalized["_credential_key"]
+            tool_run["_credential_label"] = normalized["_credential_label"]
+            runs.append(tool_run)
+
+        return runs
+
+    @staticmethod
+    def _tool_run_label(tool: dict) -> str:
+        """Return a human-readable tool label for logs."""
+        label = tool.get("tool_name", "Unknown")
+        cred_label = tool.get("_credential_label", "")
+        return f"{label} [{cred_label}]" if cred_label else label
 
     @staticmethod
     def _should_skip_tool(
@@ -246,7 +368,8 @@ class ToolOrchestrator:
         service: Service,
         asset_identifier: str,
         pw_result_file: Optional[str],
-        callback=None
+        callback=None,
+        project_domain: Optional[str] = None,
     ) -> Optional[Tuple[str, Optional[str], Optional[str], list]]:
         """Execute a single configured tool and return result tuple.
         
@@ -264,22 +387,29 @@ class ToolOrchestrator:
             (proof_type, result_file, screenshot_file, findings) tuple, or None
         """
         tool_type = tool.get('tool_type', '')
-        tool_name = tool.get('tool_name', 'Unknown')
+        tool_name = self._tool_run_label(tool)
         
         if callback:
             callback(f"\n[AUTO] Running {tool_name} on {host.ip}:{service.port}\n")
         
-        safe_tool_name = sanitize_for_filename(tool_name)
+        safe_tool_name = sanitize_for_filename(tool.get('tool_name', 'Unknown'))
         
         if tool_type == 'nmap_custom':
             return self._run_nmap_custom(
-                tool, host, service, asset_identifier, safe_tool_name, callback
+                tool, host, service, asset_identifier, safe_tool_name,
+                callback, project_domain
+            )
+
+        elif tool_type == 'command_custom':
+            return self._run_command_custom(
+                tool, host, service, asset_identifier, safe_tool_name,
+                callback, project_domain
             )
         
         elif tool_type == 'http_custom':
             return self._run_http_custom(
                 tool, host, service, asset_identifier, safe_tool_name,
-                pw_result_file, callback
+                pw_result_file, callback, project_domain
             )
         
         elif tool_type == 'nuclei':
@@ -290,20 +420,53 @@ class ToolOrchestrator:
         return None
     
     def _run_nmap_custom(
-        self, tool, host, service, asset_identifier, safe_tool_name, callback
+        self, tool, host, service, asset_identifier, safe_tool_name,
+        callback, project_domain
     ) -> Optional[Tuple]:
         """Execute nmap custom script tool."""
         result = self.nmap_script.execute(
-            host, service, asset_identifier, callback, tool_config=tool
+            host,
+            service,
+            asset_identifier,
+            callback,
+            tool_config=tool,
+            project_domain=project_domain,
+            credential=tool.get("_credential"),
         )
         
         if result.output_files:
             output_file = result.output_files[0]
-            return (f"nmap_{safe_tool_name}", output_file, None, [], None, None)
+            proof_type = self._proof_type_for_tool("nmap_custom", safe_tool_name, tool)
+            return (proof_type, output_file, None, [], None, None)
         
         if result.error and callback:
             callback(f"[ERROR] {tool.get('tool_name', 'Unknown')}: {result.error}\n")
         
+        return None
+
+    def _run_command_custom(
+        self, tool, host, service, asset_identifier, safe_tool_name,
+        callback, project_domain
+    ) -> Optional[Tuple]:
+        """Execute a generic command-based tool."""
+        result = self.command_custom.execute(
+            host,
+            service,
+            asset_identifier,
+            callback,
+            tool_config=tool,
+            project_domain=project_domain,
+            credential=tool.get("_credential"),
+        )
+
+        if result.output_files:
+            output_file = result.output_files[0]
+            proof_type = self._proof_type_for_tool("command_custom", safe_tool_name, tool)
+            return (proof_type, output_file, None, [], None, None)
+
+        if result.error and callback:
+            callback(f"[ERROR] {tool.get('tool_name', 'Unknown')}: {result.error}\n")
+
         return None
     
     @staticmethod
@@ -328,7 +491,7 @@ class ToolOrchestrator:
 
     def _run_http_custom(
         self, tool, host, service, asset_identifier, safe_tool_name,
-        pw_result_file, callback
+        pw_result_file, callback, project_domain
     ) -> Optional[Tuple]:
         """Execute HTTP custom tool with regex matching.
 
@@ -365,7 +528,10 @@ class ToolOrchestrator:
         # --- legacy command path ---
         result = self.http_custom.execute(
             host, service, asset_identifier, callback,
-            tool_config=tool, playwright_response_file=pw_result_file
+            tool_config=tool,
+            playwright_response_file=pw_result_file,
+            project_domain=project_domain,
+            credential=tool.get("_credential"),
         )
         
         if result.error and callback:
@@ -374,7 +540,8 @@ class ToolOrchestrator:
         
         if self.http_custom.did_match(result):
             output_file = result.output_files[0] if result.output_files else None
-            return (f"http_{safe_tool_name}", output_file, None, [], None, None)
+            proof_type = self._proof_type_for_tool("http_custom", safe_tool_name, tool)
+            return (proof_type, output_file, None, [], None, None)
         elif callback:
             callback(f"[SKIPPED] {tool.get('tool_name', 'Unknown')}: regex pattern not found in HTTP response\n")
         

@@ -74,5 +74,5 @@ packages = [
 include-package-data = true
 
 [tool.setuptools.package-data]
-netpal = ["config/*.json", "config/*.yaml"]
+netpal = ["config/*.json", "config/*.json.example", "config/*.yaml"]
 netpalui = ["templates/*.html", "static/*.css"]

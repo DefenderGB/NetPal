@@ -1,0 +1,8 @@
+[
+  {
+    "username": "test",
+    "password": "test",
+    "type": "domain",
+    "use_in_auto_tools": false
+  }
+]

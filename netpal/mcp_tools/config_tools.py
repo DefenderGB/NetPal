@@ -214,9 +214,9 @@ def register_config_tools(mcp):
             from ..utils.validation import check_sudo
             results["sudo"]["available"] = check_sudo()
             results["sudo"]["detail"] = (
-                "Passwordless sudo for nmap configured"
+                "Privileged nmap execution is configured"
                 if results["sudo"]["available"]
-                else "Passwordless sudo for nmap NOT configured"
+                else "Privileged nmap execution is NOT configured"
             )
         except Exception as e:
             results["sudo"]["detail"] = str(e)
