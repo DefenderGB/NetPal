@@ -226,6 +226,13 @@ To add a new subcommand:
 5. Add a routing entry in the `handlers` dict in `main()`
 6. Export from `netpal/modes/__init__.py`
 
+### AD Scan Notes
+
+- `netpal ad-scan` supports anonymous LDAP enumeration across CLI, TUI, and MCP surfaces.
+- Anonymous bind must stay opt-in via the explicit anonymous auth mode; NTLM/Kerberos should fail fast instead of silently falling back.
+- Anonymous scans should skip `nTSecurityDescriptor` / ACL collection automatically unless the flow is being intentionally redesigned.
+- Custom LDAP filters should continue accepting both full RFC-style filters like `(sAMAccountName=admin)` and bare expressions like `objectClass=*`.
+
 ### Next-Command Suggestion Engine (`utils/next_command.py`)
 
 `NextCommandSuggester` prints a contextual "next step" box after each command. It has two modes:

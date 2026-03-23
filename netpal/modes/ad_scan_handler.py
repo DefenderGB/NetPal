@@ -64,6 +64,7 @@ class ADScanHandler(ModeHandler):
             'password': getattr(self.args, 'password', '') or '',
             'hashes': getattr(self.args, 'hashes', '') or '',
             'aes_key': getattr(self.args, 'aes_key', '') or '',
+            'auth_type': getattr(self.args, 'auth_type', 'ntlm') or 'ntlm',
             'use_ssl': getattr(self.args, 'use_ssl', False),
             'use_kerberos': getattr(self.args, 'kerberos', False),
             'no_smb': getattr(self.args, 'no_smb', False),
@@ -80,26 +81,48 @@ class ADScanHandler(ModeHandler):
         }
 
     def execute_workflow(self, context):
-        from ..services.ad.ldap_client import LDAPClient
+        from ..services.ad.ldap_client import (
+            LDAPClient,
+            get_auth_validation_error,
+            normalize_auth_options,
+        )
         from ..services.ad.collector import ADCollector
+
+        auth = normalize_auth_options(
+            auth_type=context.get('auth_type', 'ntlm'),
+            username=context['username'],
+            password=context['password'],
+            hashes=context['hashes'],
+            aes_key=context['aes_key'],
+            use_kerberos=context['use_kerberos'],
+        )
+        validation_error = get_auth_validation_error(auth)
+        if validation_error:
+            print_error(validation_error)
+            return None
+
+        effective_no_sd = context['no_sd'] or auth['is_anonymous']
 
         # Create LDAP client
         client = LDAPClient(
             dc_ip=context['dc_ip'],
             domain=context['domain'],
-            username=context['username'],
-            password=context['password'],
-            hashes=context['hashes'],
-            aes_key=context['aes_key'],
+            username=auth['username'],
+            password=auth['password'],
+            hashes=auth['hashes'],
+            aes_key=auth['aes_key'],
             use_ssl=context['use_ssl'],
-            use_kerberos=context['use_kerberos'],
+            use_kerberos=auth['use_kerberos'],
             no_smb=context['no_smb'],
             channel_binding=context['channel_binding'],
             throttle=context['throttle'],
             page_size=context['page_size'],
+            allow_anonymous=auth['is_anonymous'],
         )
 
         # Connect
+        if auth['is_anonymous'] and not context['no_sd']:
+            print_info("Anonymous bind selected — skipping ACL/security descriptor queries.")
         print_info(f"Connecting to {context['dc_ip']}...")
         if not client.connect():
             print_error(f"Failed to connect to DC at {context['dc_ip']}")
@@ -119,7 +142,7 @@ class ADScanHandler(ModeHandler):
             summary = collector.collect_all(
                 output_dir=context['output_dir'],
                 output_types=context['output_types'],
-                no_sd=context['no_sd'],
+                no_sd=effective_no_sd,
                 progress_callback=progress,
                 limit=context.get('limit', 0),
             )

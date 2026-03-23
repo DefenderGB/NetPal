@@ -156,6 +156,13 @@ Important rule: project storage is local-only.
 - `netpal/services/ad/`: local LDAP/BloodHound collection
 - `netpal/services/testcase/`: CSV testcase loading + registry management
 
+AD scan behavior notes:
+
+- Anonymous LDAP scans are supported across CLI, TUI/web-served TUI, and MCP.
+- Anonymous bind must stay opt-in via the explicit anonymous auth mode; NTLM/Kerberos should fail fast instead of silently falling back.
+- Anonymous scans should skip `nTSecurityDescriptor` / ACL collection by default so enumeration still succeeds.
+- Custom LDAP filters should accept both full filters like `(sAMAccountName=admin)` and bare expressions like `objectClass=*`.
+
 ### Tool Automation
 
 - `netpal/services/tools/tool_orchestrator.py`: coordinates auto-tools

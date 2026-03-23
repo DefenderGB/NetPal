@@ -1,4 +1,5 @@
 import csv
+import logging
 import os
 import sys
 import tempfile
@@ -451,6 +452,194 @@ class LocalOnlyParityTests(unittest.TestCase):
             context["output_dir"],
             os.path.join(tmpdir, project.project_id, "ad_scan"),
         )
+
+    def test_ad_scan_handler_anonymous_auth_clears_credentials_and_skips_sd(self):
+        args = SimpleNamespace(
+            domain="corp.local",
+            dc_ip="10.10.10.10",
+            username="corp\\tester",
+            password="secret",
+            hashes=":0123456789abcdef",
+            aes_key="deadbeef",
+            auth_type="anonymous",
+            use_ssl=False,
+            kerberos=True,
+            no_smb=False,
+            channel_binding=False,
+            throttle=0.0,
+            page_size=500,
+            output_types="users",
+            no_sd=False,
+            limit=0,
+            filter=None,
+            base_dn="",
+            scope="SUBTREE",
+        )
+        project = Project(name="AD", project_id="NETP-TEST-AD-ANON")
+        netpal = SimpleNamespace(config={}, project=project, scanner=None)
+        handler = ADScanHandler(netpal, args)
+
+        client_kwargs = {}
+        collect_kwargs = {}
+
+        class FakeLDAPClient:
+            def __init__(self, **kwargs):
+                client_kwargs.update(kwargs)
+
+            def connect(self):
+                return True
+
+            def disconnect(self):
+                return None
+
+        class FakeCollector:
+            def __init__(self, client, domain=""):
+                self.client = client
+                self.domain = domain
+
+            def collect_all(self, output_dir, output_types=None, no_sd=False, progress_callback=None, limit=0):
+                collect_kwargs.update(
+                    output_dir=output_dir,
+                    output_types=output_types,
+                    no_sd=no_sd,
+                    limit=limit,
+                )
+                return {"counts": {"users": 1}, "files": {}, "errors": []}
+
+        with tempfile.TemporaryDirectory() as tmpdir, patched_scan_results(tmpdir):
+            fake_ldap3 = types.SimpleNamespace()
+            with mock.patch.dict(sys.modules, {"ldap3": fake_ldap3}):
+                self.assertTrue(handler.validate_prerequisites())
+                context = handler.prepare_context()
+
+            with (
+                mock.patch("netpal.services.ad.ldap_client.LDAPClient", FakeLDAPClient),
+                mock.patch("netpal.services.ad.collector.ADCollector", FakeCollector),
+            ):
+                result = handler.execute_workflow(context)
+
+        self.assertEqual(result["counts"]["users"], 1)
+        self.assertEqual(client_kwargs["username"], "")
+        self.assertEqual(client_kwargs["password"], "")
+        self.assertEqual(client_kwargs["hashes"], "")
+        self.assertEqual(client_kwargs["aes_key"], "")
+        self.assertFalse(client_kwargs["use_kerberos"])
+        self.assertTrue(client_kwargs["allow_anonymous"])
+        self.assertTrue(collect_kwargs["no_sd"])
+
+    def test_ad_custom_query_normalizes_bare_filters(self):
+        from netpal.services.ad.collector import ADCollector
+
+        search_kwargs = {}
+
+        class FakeLDAPClient:
+            domain = "CORP.LOCAL"
+            base_dn = "DC=CORP,DC=LOCAL"
+
+            def search(self, **kwargs):
+                search_kwargs.update(kwargs)
+                return [{"dn": "CN=Test,DC=CORP,DC=LOCAL", "attributes": {}}]
+
+        collector = ADCollector(FakeLDAPClient(), domain="corp.local")
+        results = collector.collect_custom_query("objectClass=*")
+
+        self.assertEqual(len(results), 1)
+        self.assertEqual(search_kwargs["search_filter"], "(objectClass=*)")
+        self.assertEqual(search_kwargs["attributes"], ["*"])
+        self.assertEqual(search_kwargs["search_base"], "DC=CORP,DC=LOCAL")
+
+    def test_ldap_client_anonymous_bind_uses_anonymous_auth_mode(self):
+        from ldap3 import ANONYMOUS
+        from netpal.services.ad.ldap_client import LDAPClient
+
+        bind_kwargs = {}
+
+        def fake_connection(server, **kwargs):
+            bind_kwargs.update(kwargs)
+            return SimpleNamespace(bound=True)
+
+        client = LDAPClient(dc_ip="10.10.10.10", domain="corp.local")
+        client._server = object()
+
+        with mock.patch("netpal.services.ad.ldap_client.Connection", side_effect=fake_connection):
+            connection = client._connect_anonymous()
+
+        self.assertTrue(connection.bound)
+        self.assertEqual(bind_kwargs["authentication"], ANONYMOUS)
+        self.assertTrue(bind_kwargs["auto_bind"])
+
+    def test_ad_scan_handler_ntlm_without_credentials_fails_before_connect(self):
+        args = SimpleNamespace(
+            domain="corp.local",
+            dc_ip="10.10.10.10",
+            username="",
+            password="",
+            hashes="",
+            aes_key="",
+            auth_type="ntlm",
+            use_ssl=False,
+            kerberos=False,
+            no_smb=False,
+            channel_binding=False,
+            throttle=0.0,
+            page_size=500,
+            output_types="users",
+            no_sd=False,
+            limit=0,
+            filter=None,
+            base_dn="",
+            scope="SUBTREE",
+        )
+        project = Project(name="AD", project_id="NETP-TEST-AD-NTLM")
+        netpal = SimpleNamespace(config={}, project=project, scanner=None)
+        handler = ADScanHandler(netpal, args)
+
+        with tempfile.TemporaryDirectory() as tmpdir, patched_scan_results(tmpdir):
+            fake_ldap3 = types.SimpleNamespace()
+            with mock.patch.dict(sys.modules, {"ldap3": fake_ldap3}):
+                self.assertTrue(handler.validate_prerequisites())
+                context = handler.prepare_context()
+
+            with mock.patch("netpal.services.ad.ldap_client.LDAPClient") as mock_client_cls:
+                result = handler.execute_workflow(context)
+
+        self.assertIsNone(result)
+        mock_client_cls.assert_not_called()
+
+    def test_normalize_auth_options_requires_explicit_anonymous_mode(self):
+        from netpal.services.ad.ldap_client import normalize_auth_options
+
+        auth = normalize_auth_options(auth_type="ntlm")
+
+        self.assertEqual(auth["auth_type"], "ntlm")
+        self.assertFalse(auth["is_anonymous"])
+
+    def test_kerberos_auth_without_material_returns_validation_error(self):
+        from netpal.services.ad.ldap_client import get_auth_validation_error, normalize_auth_options
+
+        auth = normalize_auth_options(auth_type="kerberos")
+
+        self.assertIn("Kerberos auth requires", get_auth_validation_error(auth))
+
+    def test_tui_ad_log_capture_routes_logger_output_to_richlog_writer(self):
+        from netpal.textual_ui.helpers import _capture_logger_to_richlog
+
+        logger = logging.getLogger("netpal.test.ad_log_capture")
+        previous_level = logger.level
+        previous_propagate = logger.propagate
+        previous_handlers = list(logger.handlers)
+        messages = []
+
+        with _capture_logger_to_richlog("netpal.test.ad_log_capture", messages.append):
+            logger.info("Detected domain SID: [b'\\x01\\x05']")
+
+        self.assertEqual(logger.level, previous_level)
+        self.assertEqual(logger.propagate, previous_propagate)
+        self.assertEqual(logger.handlers, previous_handlers)
+        self.assertEqual(len(messages), 1)
+        self.assertIn("[INFO]", messages[0])
+        self.assertIn("Detected domain SID:", messages[0])
+        self.assertIn("\\x01\\x05", messages[0])
 
     def test_check_playwright_installed_requires_browser_binary(self):
         class _FakePlaywrightContext:

@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from contextlib import contextmanager
 from pathlib import Path
 
+from rich.markup import escape
 from textual.widgets import DataTable, Select
 
 
@@ -318,6 +320,55 @@ def _nmap_progress_stdin():
     finally:
         _running = False
         _sys.stdin = old_stdin
+
+
+class _RichLogForwardHandler(logging.Handler):
+    """Forward log records into a Textual RichLog-compatible writer."""
+
+    _LEVEL_STYLES = {
+        logging.DEBUG: "dim",
+        logging.INFO: "cyan",
+        logging.WARNING: "yellow",
+        logging.ERROR: "red",
+        logging.CRITICAL: "bold red",
+    }
+
+    def __init__(self, write_line):
+        super().__init__()
+        self._write_line = write_line
+        self.setFormatter(logging.Formatter("%(message)s"))
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            style = self._LEVEL_STYLES.get(record.levelno, "white")
+            message = escape(self.format(record))
+            self._write_line(f"[{style}][{record.levelname}][/] {message}")
+        except Exception:
+            self.handleError(record)
+
+
+@contextmanager
+def _capture_logger_to_richlog(logger_name: str, write_line, level: int = logging.INFO):
+    """Temporarily route a logger namespace into a RichLog writer."""
+    logger = logging.getLogger(logger_name)
+    handler = _RichLogForwardHandler(write_line)
+    previous_level = logger.level
+    previous_propagate = logger.propagate
+
+    handler.setLevel(level)
+    logger.addHandler(handler)
+    logger.propagate = False
+
+    if previous_level in (logging.NOTSET, 0) or previous_level > level:
+        logger.setLevel(level)
+
+    try:
+        yield
+    finally:
+        logger.removeHandler(handler)
+        logger.propagate = previous_propagate
+        logger.setLevel(previous_level)
+        handler.close()
 
 
 def _reset_table(container, table_id: str, *columns: str) -> DataTable:

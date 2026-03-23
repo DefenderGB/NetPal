@@ -50,7 +50,11 @@ def register_ad_tools(mcp):
         from ..mcp_server import get_netpal_ctx
         from ..utils.persistence.project_persistence import load_active_project
         from ..utils.persistence.project_paths import ProjectPaths
-        from ..services.ad.ldap_client import LDAPClient
+        from ..services.ad.ldap_client import (
+            LDAPClient,
+            get_auth_validation_error,
+            normalize_auth_options,
+        )
         from ..services.ad.collector import ADCollector
 
         nctx = get_netpal_ctx(ctx)
@@ -68,21 +72,32 @@ def register_ad_tools(mcp):
         if output_types != "all":
             types = [t.strip() for t in output_types.split(",")]
 
-        # Determine auth mode
-        is_kerberos = use_kerberos or auth_type == "kerberos"
-        is_anonymous = auth_type == "anonymous" and not username and not password
+        auth = normalize_auth_options(
+            auth_type=auth_type,
+            username=username,
+            password=password,
+            hashes=hashes,
+            aes_key=aes_key,
+            use_kerberos=use_kerberos,
+        )
+        validation_error = get_auth_validation_error(auth)
+        if validation_error:
+            return {"error": validation_error}
+
+        effective_no_sd = no_sd or auth["is_anonymous"]
 
         client = LDAPClient(
             dc_ip=dc_ip,
             domain=domain,
-            username="" if is_anonymous else username,
-            password="" if is_anonymous else password,
-            hashes=hashes,
-            aes_key=aes_key,
+            username=auth["username"],
+            password=auth["password"],
+            hashes=auth["hashes"],
+            aes_key=auth["aes_key"],
             use_ssl=use_ssl,
-            use_kerberos=is_kerberos,
+            use_kerberos=auth["use_kerberos"],
             throttle=throttle,
             page_size=page_size,
+            allow_anonymous=auth["is_anonymous"],
         )
 
         if not client.connect():
@@ -96,13 +111,15 @@ def register_ad_tools(mcp):
             summary = collector.collect_all(
                 output_dir=output_dir,
                 output_types=types,
-                no_sd=no_sd,
+                no_sd=effective_no_sd,
                 limit=limit,
             )
 
             summary["project_id"] = project.project_id
             summary["domain"] = domain
             summary["dc_ip"] = dc_ip
+            summary["auth_type"] = auth["auth_type"]
+            summary["no_sd"] = effective_no_sd
             return summary
 
         finally:
@@ -115,6 +132,10 @@ def register_ad_tools(mcp):
         username: str = "",
         password: str = "",
         hashes: str = "",
+        aes_key: str = "",
+        use_ssl: bool = False,
+        use_kerberos: bool = False,
+        auth_type: str = "ntlm",
         attributes: str = "",
         base_dn: str = "",
         scope: str = "SUBTREE",
@@ -125,11 +146,15 @@ def register_ad_tools(mcp):
         Pyldapsearch-style ad-hoc query. Returns raw LDAP results.
 
         Args:
-            filter: LDAP filter string (e.g. '(sAMAccountName=admin)').
+            filter: LDAP filter string (e.g. '(sAMAccountName=admin)' or 'objectClass=*').
             username: Auth username.
             password: Auth password.
             hashes: NTLM hash for pass-the-hash.
-            attributes: Comma-separated attribute list (empty = all + nTSecurityDescriptor).
+            aes_key: AES key for Kerberos auth.
+            use_ssl: Use LDAPS (port 636).
+            use_kerberos: Use Kerberos auth from ccache.
+            auth_type: 'anonymous', 'ntlm', or 'kerberos'.
+            attributes: Comma-separated attribute list (empty = all readable attributes).
             base_dn: Search base DN (empty = auto from domain).
             scope: Search scope: BASE, LEVEL, or SUBTREE.
             limit: Max entries to return (0 = unlimited).
@@ -139,7 +164,11 @@ def register_ad_tools(mcp):
         """
         from ..mcp_server import get_netpal_ctx
         from ..utils.persistence.project_persistence import load_active_project
-        from ..services.ad.ldap_client import LDAPClient
+        from ..services.ad.ldap_client import (
+            LDAPClient,
+            get_auth_validation_error,
+            normalize_auth_options,
+        )
         from ..services.ad.collector import ADCollector
 
         nctx = get_netpal_ctx(ctx)
@@ -152,12 +181,28 @@ def register_ad_tools(mcp):
         if not domain or not dc_ip:
             return {"error": "Project missing ad_domain or ad_dc_ip."}
 
-        client = LDAPClient(
-            dc_ip=dc_ip,
-            domain=domain,
+        auth = normalize_auth_options(
+            auth_type=auth_type,
             username=username,
             password=password,
             hashes=hashes,
+            aes_key=aes_key,
+            use_kerberos=use_kerberos,
+        )
+        validation_error = get_auth_validation_error(auth)
+        if validation_error:
+            return {"error": validation_error}
+
+        client = LDAPClient(
+            dc_ip=dc_ip,
+            domain=domain,
+            username=auth["username"],
+            password=auth["password"],
+            hashes=auth["hashes"],
+            aes_key=auth["aes_key"],
+            use_ssl=use_ssl,
+            use_kerberos=auth["use_kerberos"],
+            allow_anonymous=auth["is_anonymous"],
         )
 
         if not client.connect():
@@ -202,6 +247,7 @@ def register_ad_tools(mcp):
 
             return {
                 "filter": filter,
+                "auth_type": auth["auth_type"],
                 "count": len(serializable),
                 "results": serializable,
             }

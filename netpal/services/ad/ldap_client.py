@@ -4,17 +4,89 @@ Supports NTLM, anonymous, and Kerberos authentication.
 Auth flow mirrors pyldapsearch's init_ldap_connection().
 """
 import logging
+import os
 import ssl
 import time
 
 import ldap3
-from ldap3 import Server, Connection, NTLM, SIMPLE, SASL, SUBTREE, ALL
+from ldap3 import ANONYMOUS, Server, Connection, NTLM, SASL, SUBTREE, ALL
 from ldap3.protocol.microsoft import security_descriptor_control
 
 log = logging.getLogger(__name__)
 
 # Default empty LM hash for pass-the-hash
 EMPTY_LM_HASH = "aad3b435b51404eeaad3b435b51404ee"
+
+
+def normalize_auth_options(
+    auth_type: str = "",
+    username: str = "",
+    password: str = "",
+    hashes: str = "",
+    aes_key: str = "",
+    use_kerberos: bool = False,
+) -> dict:
+    """Normalize auth flags so every surface resolves auth the same way."""
+    resolved_auth_type = (auth_type or "").strip().lower()
+    if resolved_auth_type == "anonymous":
+        resolved_auth_type = "anonymous"
+    elif use_kerberos or resolved_auth_type == "kerberos":
+        resolved_auth_type = "kerberos"
+    else:
+        resolved_auth_type = "ntlm"
+
+    is_kerberos = resolved_auth_type == "kerberos"
+    is_anonymous = resolved_auth_type == "anonymous"
+
+    if is_anonymous:
+        username = ""
+        password = ""
+        hashes = ""
+        aes_key = ""
+        is_kerberos = False
+        resolved_auth_type = "anonymous"
+    elif is_kerberos:
+        resolved_auth_type = "kerberos"
+    else:
+        resolved_auth_type = "ntlm"
+
+    return {
+        "auth_type": resolved_auth_type,
+        "username": username,
+        "password": password,
+        "hashes": hashes,
+        "aes_key": aes_key,
+        "use_kerberos": is_kerberos,
+        "is_anonymous": is_anonymous,
+    }
+
+
+def get_auth_validation_error(auth: dict) -> str:
+    """Return a user-facing auth validation error, or an empty string."""
+    auth_type = auth.get("auth_type", "ntlm")
+    username = (auth.get("username") or "").strip()
+    password = auth.get("password") or ""
+    hashes = auth.get("hashes") or ""
+    aes_key = auth.get("aes_key") or ""
+
+    if auth_type == "anonymous":
+        return ""
+
+    if auth_type == "kerberos":
+        if not (username or hashes or aes_key or os.environ.get("KRB5CCNAME", "").strip()):
+            return (
+                "Kerberos auth requires a username, --hashes, --aes-key, or a Kerberos ccache. "
+                "Use anonymous auth type for anonymous bind."
+            )
+        if (hashes or aes_key) and not username:
+            return "Kerberos auth requires a username when using --hashes or --aes-key."
+        return ""
+
+    if not username:
+        return "NTLM auth requires --username. Use anonymous auth type for anonymous bind."
+    if not (password or hashes):
+        return "NTLM auth requires --password or --hashes. Use anonymous auth type for anonymous bind."
+    return ""
 
 
 class LDAPClient:
@@ -38,6 +110,7 @@ class LDAPClient:
         channel_binding: bool = False,
         throttle: float = 0.0,
         page_size: int = 500,
+        allow_anonymous: bool = False,
     ):
         """
         Args:
@@ -53,6 +126,7 @@ class LDAPClient:
             channel_binding: Enable LDAPS channel binding.
             throttle: Seconds to sleep between LDAP search page requests.
             page_size: Number of results per LDAP page (default 500).
+            allow_anonymous: Allow anonymous bind when no credentials are provided.
         """
         self.dc_ip = dc_ip
         self.domain = domain.upper()
@@ -66,6 +140,7 @@ class LDAPClient:
         self.channel_binding = channel_binding
         self.throttle = throttle
         self.page_size = page_size
+        self.allow_anonymous = allow_anonymous
 
         self._connection = None
         self._server = None
@@ -77,7 +152,7 @@ class LDAPClient:
         Auth priority (mirrors pyldapsearch):
         1. Kerberos (if use_kerberos=True) — uses ccache or aes_key
         2. NTLM pass-the-hash (if hashes provided)
-        3. Anonymous (if username and password both empty)
+        3. Anonymous (only when allow_anonymous=True)
         4. NTLM with password (default)
 
         For LDAPS, tries TLS 1.2 first, falls back to TLS 1.0.
@@ -114,8 +189,12 @@ class LDAPClient:
                 self._connection = self._connect_kerberos()
             elif self.hashes:
                 self._connection = self._connect_ntlm_hash()
-            elif not self.username and not self.password:
+            elif not self.username and not self.password and self.allow_anonymous:
                 self._connection = self._connect_anonymous()
+            elif not self.username and not self.password:
+                raise ValueError(
+                    "Credentials are required for NTLM/Kerberos auth unless anonymous bind is explicitly enabled."
+                )
             else:
                 self._connection = self._connect_ntlm_password()
 
@@ -170,7 +249,7 @@ class LDAPClient:
         """Connect with anonymous bind."""
         conn = Connection(
             self._server,
-            authentication=SIMPLE,
+            authentication=ANONYMOUS,
             auto_bind=True,
             receive_timeout=30,
         )

@@ -163,6 +163,8 @@ netpal hosts
 # 9. Optional: run a local AD scan
 netpal project-edit
 netpal ad-scan --username 'CORP\\tester' --password 'P@ssw0rd'
+netpal ad-scan --domain HTB.LOCAL --dc-ip 10.10.10.161 --auth-type anonymous --output-types users
+netpal ad-scan --domain HTB.LOCAL --dc-ip 10.10.10.161 --auth-type anonymous --filter 'objectClass=*'
 
 # 10. Optional: track testcase status locally
 netpal testcase --load --csv-path ./testcases.csv
@@ -234,6 +236,9 @@ Use `netpal ad-scan` to run local LDAP collection and produce BloodHound-compati
 - Auto tools can reuse that AD metadata via `{domain}`, `{domain_dn}`, or indexed `{domain0}`, `{domain1}`, ... placeholders inside `netpal/config/exploit_tools.json`.
 - Set `ad_domain` and `ad_dc_ip` first with `netpal project-edit` or the TUI project editor.
 - Dependencies include `ldap3` and `pycryptodome`.
+- Anonymous scans are supported. When NetPal detects an anonymous bind, it automatically skips `nTSecurityDescriptor`/ACL collection so user and object enumeration can still complete.
+- Anonymous bind is only used when you explicitly select anonymous auth. NTLM and Kerberos modes now fail fast when the required auth material is missing.
+- Custom LDAP filters accept either full RFC-style filters like `(sAMAccountName=admin)` or bare expressions like `objectClass=*`.
 - Custom LDAP query output is written under `scan_results/<project_id>/ad_scan/ad_queries/`.
 
 ## Auto Tool Credentials

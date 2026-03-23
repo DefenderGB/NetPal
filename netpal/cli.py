@@ -133,9 +133,10 @@ Runs a fully automated pipeline:
 AD_SCAN_EXAMPLES = """\
 Examples:
   netpal ad-scan --username 'CORP\\admin' --password 'P@ssw0rd'
-  netpal ad-scan --domain CORP.LOCAL --dc-ip 10.0.0.1 --auth-type anonymous
+  netpal ad-scan --domain CORP.LOCAL --dc-ip 10.0.0.1 --auth-type anonymous --output-types users
   netpal ad-scan --username 'CORP\\admin' --password 'P@ss' --output-types users,groups
   netpal ad-scan --filter '(sAMAccountName=admin)' --username 'CORP\\admin' --password 'P@ss'
+  netpal ad-scan --domain HTB.LOCAL --dc-ip 10.10.10.161 --auth-type anonymous --filter 'objectClass=*'
 """
 
 
@@ -504,7 +505,7 @@ findings JSON, and all evidence files from scan_results/.
     ad_parser.add_argument('--channel-binding', action='store_true',
                            help='Enable LDAPS channel binding')
     ad_parser.add_argument('--auth-type', choices=['anonymous', 'ntlm', 'kerberos'],
-                           default='ntlm', help='Authentication method (default: ntlm)')
+                           default='ntlm', help='Authentication method; anonymous bind is only used when set to anonymous (default: ntlm)')
     ad_parser.add_argument('--output-types', default='all',
                            help='Comma-separated types or "all" (users,computers,groups,domains,ous,gpos,containers)')
     ad_parser.add_argument('--throttle', type=float, default=0.0,
@@ -516,9 +517,9 @@ findings JSON, and all evidence files from scan_results/.
     ad_parser.add_argument('--limit', type=int, default=0,
                            help='Max entries to collect per object type (0 = unlimited)')
     ad_parser.add_argument('--no-sd', action='store_true',
-                           help='Skip nTSecurityDescriptor queries')
+                           help='Skip nTSecurityDescriptor queries (auto-enabled for anonymous scans)')
     ad_parser.add_argument('--filter', default=None,
-                           help='Custom LDAP filter for ad-hoc queries')
+                           help='Custom LDAP filter for ad-hoc queries; accepts full filters or bare expressions like objectClass=*')
     ad_parser.add_argument('--scope', choices=['BASE', 'LEVEL', 'SUBTREE'],
                            default='SUBTREE', help='LDAP search scope (default: SUBTREE)')
 

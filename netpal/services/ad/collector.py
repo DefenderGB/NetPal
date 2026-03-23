@@ -87,6 +87,16 @@ COLLECTION_MAP = {
 ALL_TYPES = list(COLLECTION_MAP.keys())
 
 
+def normalize_ldap_filter(ldap_filter: str) -> str:
+    """Accept both RFC-style filters and windapsearch-style bare expressions."""
+    value = (ldap_filter or "").strip()
+    if not value:
+        return value
+    if value.startswith("(") and value.endswith(")"):
+        return value
+    return f"({value})"
+
+
 class ADCollector:
     """Orchestrate AD data collection and produce BH v6 JSON."""
 
@@ -224,7 +234,7 @@ class ADCollector:
 
         Args:
             ldap_filter: LDAP filter string.
-            attributes: Attribute list (empty = all + nTSecurityDescriptor).
+            attributes: Attribute list (empty = all readable attributes).
             base_dn: Search base DN (empty = auto).
             scope: Search scope.
             limit: Maximum entries to return (0 = unlimited).
@@ -234,11 +244,11 @@ class ADCollector:
         """
         from ldap3 import SUBTREE
         if attributes is None:
-            attributes = ["*", "nTSecurityDescriptor"]
+            attributes = ["*"]
 
         return self.client.search(
             search_base=base_dn or self.client.base_dn,
-            search_filter=ldap_filter,
+            search_filter=normalize_ldap_filter(ldap_filter),
             attributes=attributes,
             scope=scope or SUBTREE,
             limit=limit,

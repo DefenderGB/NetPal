@@ -52,6 +52,7 @@ from .helpers import (
     VIEW_TOOLS,
     _busy_button,
     _build_starter_asset_name,
+    _capture_logger_to_richlog,
     _duplicate_ip_set,
     _get_interfaces_with_valid_ips,
     _get_path_suggestions,
@@ -2313,79 +2314,101 @@ class ADScanView(BaseNetPalView):
         with _busy_button(self.app, btn, "Scanning..."):
             self.app.call_from_thread(log.clear)
             self.app.call_from_thread(status.update, "")
-            self.app.call_from_thread(log.write, f"[bold yellow]Connecting to {dc_ip} ({domain.upper()})...[/]")
+            write_log_line = lambda message: self.app.call_from_thread(log.write, message)
 
             try:
-                from ldap3 import SUBTREE
-                from netpal.services.ad.collector import ADCollector
-                from netpal.services.ad.ldap_client import LDAPClient
-                from netpal.utils.persistence.project_paths import ProjectPaths
+                with _capture_logger_to_richlog("netpal.services.ad", write_log_line):
+                    from ldap3 import SUBTREE
+                    from netpal.services.ad.collector import ADCollector
+                    from netpal.services.ad.ldap_client import (
+                        LDAPClient,
+                        get_auth_validation_error,
+                        normalize_auth_options,
+                    )
+                    from netpal.utils.persistence.project_paths import ProjectPaths
 
-                output_types = None if output_types_raw == "all" else [value.strip() for value in output_types_raw.split(",") if value.strip()]
-                is_kerberos = auth_type == "kerberos"
-                is_anonymous = auth_type == "anonymous"
-
-                client = LDAPClient(
-                    dc_ip=dc_ip,
-                    domain=domain.upper(),
-                    username="" if is_anonymous else username,
-                    password="" if is_anonymous else password,
-                    hashes=hashes,
-                    aes_key=aes_key,
-                    use_ssl=use_ssl,
-                    use_kerberos=is_kerberos,
-                    throttle=throttle,
-                    page_size=page_size,
-                )
-                if not client.connect():
-                    self.app.call_from_thread(log.write, f"[bold red]Failed to connect to {dc_ip}[/]")
-                    return
-
-                try:
-                    project.ad_domain = domain
-                    project.ad_dc_ip = dc_ip
-                    project.save_to_file()
-
-                    paths = ProjectPaths(project.project_id)
-                    output_dir = os.path.join(paths.get_project_directory(), "ad_scan")
-                    collector = ADCollector(client, domain=domain.upper())
-
-                    if ldap_filter:
-                        self.app.call_from_thread(log.write, f"[cyan]Running custom LDAP query: {ldap_filter}[/]")
-                        results = collector.collect_custom_query(ldap_filter=ldap_filter, scope=SUBTREE)
-                        queries_dir = os.path.join(output_dir, "ad_queries")
-                        os.makedirs(queries_dir, exist_ok=True)
-                        query_path = os.path.join(queries_dir, "query_latest.json")
-                        with open(query_path, "w", encoding="utf-8") as handle:
-                            json.dump({"filter": ldap_filter, "results": results}, handle, indent=2, default=str)
-                        self.app.call_from_thread(log.write, f"[bold green]Saved {len(results)} query results[/]")
-                        self.app.call_from_thread(log.write, f"[dim]{query_path}[/]")
+                    output_types = None if output_types_raw == "all" else [value.strip() for value in output_types_raw.split(",") if value.strip()]
+                    auth = normalize_auth_options(
+                        auth_type=auth_type,
+                        username=username,
+                        password=password,
+                        hashes=hashes,
+                        aes_key=aes_key,
+                        use_kerberos=auth_type == "kerberos",
+                    )
+                    validation_error = get_auth_validation_error(auth)
+                    if validation_error:
+                        self.app.call_from_thread(status.update, "[red]Authentication details required.[/]")
+                        write_log_line(f"[bold red]{validation_error}[/]")
                         return
 
-                    def progress(message: str) -> None:
-                        self.app.call_from_thread(log.write, f"[yellow]{message}[/]")
+                    effective_no_sd = no_sd or auth["is_anonymous"]
+                    write_log_line(f"[bold yellow]Connecting to {dc_ip} ({domain.upper()})...[/]")
 
-                    summary = collector.collect_all(
-                        output_dir=output_dir,
-                        output_types=output_types,
-                        no_sd=no_sd,
-                        progress_callback=progress,
+                    client = LDAPClient(
+                        dc_ip=dc_ip,
+                        domain=domain.upper(),
+                        username=auth["username"],
+                        password=auth["password"],
+                        hashes=auth["hashes"],
+                        aes_key=auth["aes_key"],
+                        use_ssl=use_ssl,
+                        use_kerberos=auth["use_kerberos"],
+                        throttle=throttle,
+                        page_size=page_size,
+                        allow_anonymous=auth["is_anonymous"],
                     )
-                    counts = summary.get("counts", {})
-                    self.app.call_from_thread(log.write, "\n[bold green]AD collection complete[/]")
-                    for object_type, count in counts.items():
-                        self.app.call_from_thread(log.write, f"  [cyan]{object_type:<15}[/] {count:>6} objects")
-                    files = summary.get("files", {})
-                    if files:
-                        self.app.call_from_thread(log.write, "\n[yellow]Output files:[/]")
-                        for filepath in files.values():
-                            self.app.call_from_thread(log.write, f"  [dim]{filepath}[/]")
-                finally:
-                    client.disconnect()
+                    if auth["is_anonymous"] and not no_sd:
+                        write_log_line("[yellow]Anonymous bind detected; skipping ACL/security descriptor queries.[/]")
+                    if not client.connect():
+                        write_log_line(f"[bold red]Failed to connect to {dc_ip}[/]")
+                        return
+
+                    try:
+                        project.ad_domain = domain
+                        project.ad_dc_ip = dc_ip
+                        project.save_to_file()
+
+                        paths = ProjectPaths(project.project_id)
+                        output_dir = os.path.join(paths.get_project_directory(), "ad_scan")
+                        collector = ADCollector(client, domain=domain.upper())
+
+                        if ldap_filter:
+                            write_log_line(f"[cyan]Running custom LDAP query: {ldap_filter}[/]")
+                            results = collector.collect_custom_query(ldap_filter=ldap_filter, scope=SUBTREE)
+                            queries_dir = os.path.join(output_dir, "ad_queries")
+                            os.makedirs(queries_dir, exist_ok=True)
+                            query_path = os.path.join(queries_dir, "query_latest.json")
+                            with open(query_path, "w", encoding="utf-8") as handle:
+                                json.dump({"filter": ldap_filter, "results": results}, handle, indent=2, default=str)
+                            write_log_line(f"[bold green]Saved {len(results)} query results[/]")
+                            write_log_line(f"[dim]{query_path}[/]")
+                            return
+
+                        def progress(message: str) -> None:
+                            write_log_line(f"[yellow]{message}[/]")
+
+                        summary = collector.collect_all(
+                            output_dir=output_dir,
+                            output_types=output_types,
+                            no_sd=effective_no_sd,
+                            progress_callback=progress,
+                        )
+                        counts = summary.get("counts", {})
+                        write_log_line("\n[bold green]AD collection complete[/]")
+                        for object_type, count in counts.items():
+                            write_log_line(f"  [cyan]{object_type:<15}[/] {count:>6} objects")
+                        files = summary.get("files", {})
+                        if files:
+                            write_log_line("\n[yellow]Output files:[/]")
+                            for filepath in files.values():
+                                write_log_line(f"  [dim]{filepath}[/]")
+                    finally:
+                        client.disconnect()
 
                 self.app.call_from_thread(self.app.refresh_project_state, project)
             except Exception as exc:
-                self.app.call_from_thread(log.write, f"[bold red]Error: {exc}[/]")
+                write_log_line(f"[bold red]Error: {exc}[/]")
             finally:
                 self._scan_running = False
 
