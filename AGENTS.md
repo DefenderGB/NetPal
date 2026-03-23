@@ -51,17 +51,19 @@ uv run netpal setup
 uv run netpal list
 uv run netpal init "My Project"
 uv run netpal interactive
+uv run netpal tui
 uv run netpal website
 uv run netpal-mcp
 ```
 
-`netpal interactive` and `netpal website` should fail fast if required runtime tools (`nmap` or Playwright/Chromium) are unavailable.
+`netpal interactive`, `netpal tui`, and `netpal website` should fail fast if required runtime tools (`nmap` or Playwright/Chromium) are unavailable.
 
 Useful verification commands:
 
 ```bash
 uv run netpal --help
 uv run netpal interactive --help
+uv run netpal tui --help
 uv run netpal ad-scan --help
 uv run netpal testcase --help
 uv run python -m compileall netpal netpalui
@@ -88,7 +90,7 @@ uv run python -m netpal --help
 - `netpal/tui.py`: public Textual TUI shim and stable import surface
 - `netpal/textual_ui/`: internal Textual operator UI package (app, shared components, helpers, theme)
 - `netpal/mcp_server.py`: MCP server startup and tool/resource registration
-- `netpalui/app.py`: lightweight web UI app
+- `netpalui/app.py`: Flask operator web UI app
 
 ### Command Handlers
 
@@ -209,6 +211,7 @@ Important rule: MCP should not expose cloud-storage tools.
 - `netpalui/templates/`: HTML templates
 - `netpalui/static/style.css`: styling
 
+Credentials in the Textual TUI are managed from the dedicated Credentials view backed by `creds.json`, not through the generic Settings JSON editor.
 If project metadata changes, make sure badges/columns/forms stay in sync across TUI and web output.
 Important rule: TUI actions should reuse CLI modes/handlers/shared helpers whenever possible. Do not add parallel TUI-only backend logic if the CLI path can be reused or lightly generalized without changing normal CLI behavior.
 

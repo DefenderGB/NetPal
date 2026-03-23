@@ -431,6 +431,23 @@ RichLog {
     height: 1fr;
 }
 
+#credentials-pane {
+    width: 100%;
+    height: 1fr;
+}
+
+#credentials-table {
+    width: 100%;
+    min-width: 100%;
+    height: 1fr;
+    min-height: 20;
+}
+
+#credentials-action-bar {
+    height: 1;
+    margin: 0 0 1 0;
+}
+
 #settings-editor {
     height: 1fr;
     min-height: 20;
@@ -578,6 +595,12 @@ RichLog {
 .layout-narrow #hosts-detail-pane,
 .layout-narrow .task-layout > .pane-box:last-child,
 .layout-narrow #settings-pane {
+    height: 1fr;
+    min-height: 10;
+    max-height: 1fr;
+}
+
+.layout-narrow #credentials-pane {
     height: 1fr;
     min-height: 10;
     max-height: 1fr;

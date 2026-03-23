@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Settings | NetPal{% endblock %}
+{% block content %}
+<section class="page-header">
+    <div class="page-header-copy">
+        <p class="kicker">Settings</p>
+        <h1>JSON Configuration</h1>
+        <p class="page-intro">Edit the shared JSON documents used by NetPal. Credentials stay on the dedicated Credentials page.</p>
+    </div>
+</section>
+
+<section class="card">
+    <div class="tab-row">
+        {% for settings_file in settings_files %}
+        <a href="{{ url_for('settings_page', file=settings_file) }}" class="tab-link{% if settings_file == filename %} is-active{% endif %}">{{ settings_file }}</a>
+        {% endfor %}
+    </div>
+    <form action="{{ url_for('settings_page') }}" method="post">
+        <input type="hidden" name="filename" value="{{ filename }}">
+        <label class="field">
+            <span>{{ filename }}</span>
+            <textarea class="textarea editor-textarea" name="content" rows="28" spellcheck="false">{{ editor_text }}</textarea>
+        </label>
+        <div class="button-row">
+            <button class="button" type="submit">Save {{ filename }}</button>
+        </div>
+    </form>
+</section>
+{% endblock %}

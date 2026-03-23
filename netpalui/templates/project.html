@@ -1,230 +1,197 @@
 {% extends "base.html" %}
-{% block title %}{{ project.name }} — NetPalUI{% endblock %}
-
-{% block breadcrumb %}
-<nav class="breadcrumb">
-    <span class="sep">›</span>
-    <span>{{ project.name }}</span>
-</nav>
-{% endblock %}
-
+{% block title %}{{ project.name }} | NetPal{% endblock %}
 {% block content %}
-<div class="container">
-    <h1>{{ project.name }}</h1>
-    <p class="text-muted">{{ project_id }}{% if project.external_id %} · {{ project.external_id }}{% endif %}</p>
-    {% if project_description %}
-    <p>{{ project_description }}</p>
-    {% endif %}
-    {% if project.ad_domain or project.ad_dc_ip %}
-    <p class="text-muted">
-        {% if project.ad_domain %}AD: {{ project.ad_domain }}{% endif %}
-        {% if project.ad_domain and project.ad_dc_ip %} · {% endif %}
-        {% if project.ad_dc_ip %}DC: {{ project.ad_dc_ip }}{% endif %}
-    </p>
-    {% endif %}
-
-    {# --- Metrics --- #}
-    <div class="metrics-row">
-        <div class="metric-card">
-            <div class="metric-value">{{ host_count }}</div>
-            <div class="metric-label">Hosts</div>
-        </div>
-        <div class="metric-card">
-            <div class="metric-value">{{ service_count }}</div>
-            <div class="metric-label">Services</div>
-        </div>
-        <div class="metric-card">
-            <div class="metric-value">{{ finding_count }}</div>
-            <div class="metric-label">Findings</div>
+<section class="hero-band project-overview-hero">
+    <div class="hero-copy">
+        <p class="kicker">Project Overview</p>
+        <h1>{{ project.name }}</h1>
+        <p class="hero-copy-text">
+            {{ project_description or "A high-signal overview of the engagement: assets in play, where services are concentrated, which findings are driving attention, and what evidence is already captured." }}
+        </p>
+        <div class="tag-list">
+            <span class="tag mono">{{ project_id }}</span>
+            {% if project.external_id %}<span class="tag">{{ project.external_id }}</span>{% endif %}
+            {% if project.ad_domain %}<span class="tag">{{ project.ad_domain }}</span>{% endif %}
+            {% if project.ad_dc_ip %}<span class="tag mono">{{ project.ad_dc_ip }}</span>{% endif %}
         </div>
     </div>
-
-    {# --- Severity breakdown --- #}
-    {% if severity_counts %}
-    <div class="severity-row">
-        {% for sev, count in severity_counts.items() %}
-        <span class="badge {{ severity_color(sev) }}">{{ sev }}: {{ count }}</span>
-        {% endfor %}
+    <div class="hero-actions">
+        <a href="{{ url_for('projects_page', selected=project.project_id) }}" class="button secondary">Project Home</a>
+        <a href="{{ url_for('hosts_page') }}" class="button quiet">Inspect Hosts</a>
+        <a href="{{ url_for('findings_page') }}" class="button quiet">Inspect Findings</a>
     </div>
-    {% endif %}
-
-    {# ================================================================= #}
-    {# COLLAPSIBLE HOSTS BOX                                             #}
-    {# ================================================================= #}
-    <div class="collapsible-box">
-        <div class="collapsible-header" onclick="this.parentElement.classList.toggle('open')">
-            <span class="collapsible-icon">▶</span>
-            <h2>🖥️ Hosts ({{ host_count }})</h2>
-        </div>
-        <div class="collapsible-content">
-
-            {# --- Web Screenshots Gallery --- #}
-            {% if screenshots %}
-            <section class="section">
-                <h3>🖼️ Web Screenshots</h3>
-                <div class="screenshot-grid">
-                    {% for ss in screenshots %}
-                    <div class="screenshot-card">
-                        <div class="screenshot-img-wrap">
-                            <img src="{{ url_for('serve_file', filepath=ss.file) }}" alt="Screenshot {{ ss.host_ip }}:{{ ss.port }}" loading="lazy" class="screenshot-clickable">
-                        </div>
-                        <div class="screenshot-cropped">✂ Image Cropped</div>
-                        <div class="screenshot-label">{{ ss.host_ip }}:{{ ss.port }} ({{ ss.service }})</div>
-                        {% if ss.hostname %}
-                        <div class="screenshot-hostname">{{ ss.hostname }}</div>
-                        {% endif %}
-                    </div>
-                    {% endfor %}
-                </div>
-            </section>
-            {% endif %}
-
-            {# --- Host Details --- #}
-            {% for host in hosts %}
-            <section class="section host-section">
-                <h3>🖥️ {{ host.ip }}</h3>
-                {% if host.hostname %}
-                <p class="host-hostname">{{ host.hostname }}</p>
-                {% endif %}
-                {% if host.network_id and host.network_id != "unknown" %}
-                <p class="text-muted">Network: {{ host.network_id }}</p>
-                {% endif %}
-                {% if host.os %}
-                <p class="text-muted">OS: {{ host.os }}</p>
-                {% endif %}
-
-                {% for svc in host.services %}
-                <div class="service-block">
-                    <h4>
-                        <span class="port-badge">{{ svc.port }}/{{ svc.protocol }}</span>
-                        {{ svc.service_name }}
-                        {% if svc.service_version %}
-                        <span class="text-muted">— {{ svc.service_version }}</span>
-                        {% endif %}
-                    </h4>
-                    {% if svc.extrainfo %}
-                    <p class="text-muted svc-extra">{{ svc.extrainfo }}</p>
-                    {% endif %}
-
-                    {% if svc.proofs %}
-                    <ul class="proof-list">
-                        {% for proof in svc.proofs %}
-                        <li class="proof-item">
-                            <div class="proof-type">📋 {{ proof.type }}</div>
-                            <div class="proof-files">
-                                {% for f in proof.files %}
-                                <div class="proof-file">
-                                    {% if f.type == "image" %}
-                                    <div class="proof-file-name">{{ f.name }}</div>
-                                    <img src="{{ url_for('serve_file', filepath=f.path) }}" alt="{{ f.name }}" class="proof-img" loading="lazy">
-                                    {% elif f.type == "text" %}
-                                    <div class="proof-file-name">{{ f.name }}</div>
-                                    <pre class="proof-text">{{ f.content }}</pre>
-                                    {% elif f.type == "jsonl" %}
-                                    <div class="proof-file-name">{{ f.name }}</div>
-                                    <pre class="proof-text proof-json">{{ f.content }}</pre>
-                                    {% endif %}
-                                </div>
-                                {% endfor %}
-                            </div>
-                        </li>
-                        {% endfor %}
-                    </ul>
-                    {% endif %}
-                </div>
-                {% endfor %}
-            </section>
-            {% endfor %}
-
-        </div>
+    <div class="hero-metrics">
+        <article class="hero-metric">
+            <span>Assets</span>
+            <strong>{{ project.assets | length }}</strong>
+        </article>
+        <article class="hero-metric">
+            <span>Hosts</span>
+            <strong>{{ host_count }}</strong>
+        </article>
+        <article class="hero-metric">
+            <span>Services</span>
+            <strong>{{ service_count }}</strong>
+        </article>
+        <article class="hero-metric">
+            <span>Findings</span>
+            <strong>{{ finding_count }}</strong>
+        </article>
     </div>
+</section>
 
-    {# ================================================================= #}
-    {# COLLAPSIBLE FINDINGS BOX                                          #}
-    {# ================================================================= #}
-    <div class="collapsible-box">
-        <div class="collapsible-header" onclick="this.parentElement.classList.toggle('open')">
-            <span class="collapsible-icon">▶</span>
-            <h2>🔍 Findings ({{ finding_count }})</h2>
-            {% if severity_counts %}
-            <div class="header-badges">
-                {% for sev, count in severity_counts.items() %}
-                <span class="badge {{ severity_color(sev) }}">{{ sev }}: {{ count }}</span>
-                {% endfor %}
-            </div>
-            {% endif %}
-        </div>
-        <div class="collapsible-content">
-
-            {% if findings %}
-            {% for f in findings %}
-            <div class="card finding-card">
-                <div class="finding-header">
-                    <span class="badge {{ severity_color(f.severity) }}">{{ f.severity }}</span>
-                    <h3 class="finding-name">{{ f.name }}</h3>
-                    {% if f.cvss is not none %}
-                    <span class="cvss-badge" title="CVSS Score">CVSS {{ f.cvss }}</span>
-                    {% endif %}
-                </div>
-
-                <div class="finding-meta text-muted">
-                    <span>Host: {{ f.host_ip }}</span>
-                    {% if f.host_hostname %}
-                    <span>Hostname: {{ f.host_hostname }}</span>
-                    {% endif %}
-                    {% if f.host_network_id and f.host_network_id != "unknown" %}
-                    <span>Network: {{ f.host_network_id }}</span>
-                    {% endif %}
-                    <span>Port: {{ f.port }}</span>
-                    {% if f.cwe %}
-                    <span>CWE: {{ f.cwe }}</span>
-                    {% endif %}
-                </div>
-
-                {% if f.description %}
-                <div class="finding-section">
-                    <h4>Description</h4>
-                    <p>{{ f.description }}</p>
-                </div>
-                {% endif %}
-
-                {% if f.impact %}
-                <div class="finding-section">
-                    <h4>Impact</h4>
-                    <p>{{ f.impact }}</p>
-                </div>
-                {% endif %}
-
-                {% if f.remediation %}
-                <div class="finding-section">
-                    <h4>Remediation</h4>
-                    <div class="remediation-text">{{ f.remediation | replace('\n', '<br>') | safe }}</div>
-                </div>
-                {% endif %}
-
-                {% if f.proof_file %}
-                <div class="finding-section">
-                    <h4>Proof Files</h4>
-                    <div class="proof-file-links">
-                        {% for pf in f.proof_file.split(',') %}
-                        {% set pf_trimmed = pf.strip() %}
-                        {% if pf_trimmed %}
-                        <a href="{{ url_for('serve_file', filepath=pf_trimmed) }}" target="_blank" class="proof-link">📎 {{ pf_trimmed.split('/')[-1] }}</a>
-                        {% endif %}
-                        {% endfor %}
+<section class="dashboard-grid">
+    <section class="card">
+        <p class="kicker">Scope</p>
+        <h2 class="card-title">Asset Portfolio</h2>
+        {% if highlights.asset_rows %}
+        <div class="feature-stack">
+            {% for row in highlights.asset_rows %}
+            <article class="feature-row">
+                <div>
+                    <strong>{{ row.asset.name }}</strong>
+                    <p class="field-hint">{{ row.asset.type }}</p>
+                    <div class="tag-list">
+                        {% if row.asset.network %}<span class="tag mono">{{ row.asset.network }}</span>{% endif %}
+                        {% if row.asset.target %}<span class="tag mono">{{ row.asset.target }}</span>{% endif %}
+                        {% if row.asset.file %}<span class="tag mono">{{ row.asset.file }}</span>{% endif %}
                     </div>
                 </div>
-                {% endif %}
-            </div>
+                <div class="feature-stats">
+                    <span>{{ row.host_count }} Hosts</span>
+                    <span>{{ row.service_count }} Services</span>
+                    <span>{{ row.finding_count }} Finding refs</span>
+                </div>
+            </article>
             {% endfor %}
-            {% else %}
-            <div class="card">
-                <p class="text-muted">No findings for this project.</p>
-            </div>
-            {% endif %}
-
         </div>
-    </div>
+        {% else %}
+        <p class="field-hint">No assets registered yet.</p>
+        {% endif %}
+    </section>
 
-</div>
+    <section class="card">
+        <p class="kicker">Finding Landscape</p>
+        <h2 class="card-title">Severity Mix</h2>
+        {% if highlights.severity_counts %}
+        <div class="signal-strip">
+            {% for sev, count in highlights.severity_counts.items() %}
+            <span class="tag {{ severity_color(sev) }}">{{ sev }}: {{ count }}</span>
+            {% endfor %}
+        </div>
+        {% else %}
+        <p class="field-hint">No findings recorded yet.</p>
+        {% endif %}
+
+        <div class="signal-list">
+            <div class="signal-row">
+                <span>Total Findings</span>
+                <strong>{{ finding_count }}</strong>
+            </div>
+            <div class="signal-row">
+                <span>Hosts With Services</span>
+                <strong>{{ highlights.top_hosts | length }}</strong>
+            </div>
+            <div class="signal-row">
+                <span>Screenshots Captured</span>
+                <strong>{{ highlights.screenshot_preview | length }}</strong>
+            </div>
+        </div>
+    </section>
+</section>
+
+<section class="stack-grid">
+    <section class="card">
+        <p class="kicker">Hot Hosts</p>
+        <h2 class="card-title">Where Attention Is Concentrated</h2>
+        {% if highlights.top_hosts %}
+        <div class="feature-stack">
+            {% for row in highlights.top_hosts %}
+            <article class="feature-row">
+                <div>
+                    <strong>{{ row.label }}</strong>
+                    <p class="field-hint">{{ row.service_preview or "No discovered services" }}</p>
+                </div>
+                <div class="feature-stats">
+                    <span>{{ row.service_count }} Services</span>
+                    <span>{{ row.finding_count }} Findings</span>
+                    <span>{{ row.proof_count }} Proof sets</span>
+                </div>
+            </article>
+            {% endfor %}
+        </div>
+        {% else %}
+        <p class="field-hint">No hosts discovered yet.</p>
+        {% endif %}
+    </section>
+
+    <section class="card">
+        <p class="kicker">Priority Queue</p>
+        <h2 class="card-title">Lead Findings</h2>
+        {% if highlights.top_findings %}
+        <div class="feature-stack">
+            {% for item in highlights.top_findings %}
+            <article class="feature-row">
+                <div>
+                    <div class="tag-list">
+                        <span class="tag {{ severity_color(item.finding.severity) }}">{{ item.finding.severity }}</span>
+                        {% if item.finding.cvss is not none %}<span class="tag">CVSS {{ item.finding.cvss }}</span>{% endif %}
+                        {% if item.finding.cwe %}<span class="tag">{{ item.finding.cwe }}</span>{% endif %}
+                    </div>
+                    <strong>{{ item.finding.name }}</strong>
+                    <p class="field-hint">{{ item.host_label }}</p>
+                </div>
+                <a class="micro-link" href="{{ url_for('findings_page', finding_id=item.finding.finding_id) }}">Open</a>
+            </article>
+            {% endfor %}
+        </div>
+        {% else %}
+        <p class="field-hint">No findings recorded yet.</p>
+        {% endif %}
+    </section>
+
+    <section class="card">
+        <p class="kicker">Screenshot Board</p>
+        <h2 class="card-title">Recent Evidence</h2>
+        {% if highlights.screenshot_preview %}
+        <div class="mini-gallery">
+            {% for screenshot in highlights.screenshot_preview %}
+            <article class="mini-shot">
+                <img class="proof-thumb screenshot-clickable" src="{{ url_for('serve_file', filepath=screenshot.file) }}" alt="{{ screenshot.host_ip }}:{{ screenshot.port }}">
+                <div class="proof-meta">
+                    <strong>{{ screenshot.host_ip }}:{{ screenshot.port }}</strong>
+                    <span>{{ screenshot.service }}</span>
+                    {% if screenshot.hostname %}<span class="mono">{{ screenshot.hostname }}</span>{% endif %}
+                </div>
+            </article>
+            {% endfor %}
+        </div>
+        {% else %}
+        <p class="field-hint">No screenshots captured yet.</p>
+        {% endif %}
+    </section>
+
+    <section class="card">
+        <p class="kicker">Deep Dive</p>
+        <h2 class="card-title">Follow the Workflow</h2>
+        <div class="signal-list">
+            <div class="signal-row">
+                <span>Recon and service detail</span>
+                <a class="micro-link" href="{{ url_for('hosts_page') }}">Open Hosts</a>
+            </div>
+            <div class="signal-row">
+                <span>Finding editing and manual entry</span>
+                <a class="micro-link" href="{{ url_for('findings_page') }}">Open Findings</a>
+            </div>
+            <div class="signal-row">
+                <span>Tool reruns and screenshots</span>
+                <a class="micro-link" href="{{ url_for('tools_page') }}">Open Tools</a>
+            </div>
+            <div class="signal-row">
+                <span>AI review and enhancement</span>
+                <a class="micro-link" href="{{ url_for('ai_page') }}">Open AI</a>
+            </div>
+        </div>
+    </section>
+</section>
 {% endblock %}

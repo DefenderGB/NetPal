@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block title %}AD Scan | NetPal{% endblock %}
+{% block content %}
+<section class="page-header">
+    <div class="page-header-copy">
+        <p class="kicker">AD</p>
+        <h1>LDAP Collection and Queries</h1>
+        <p class="page-intro">Run the same local LDAP collection path as the TUI, including anonymous bind mode and custom LDAP queries.</p>
+    </div>
+</section>
+
+<form class="card" action="{{ url_for('ad_start') }}" method="post">
+    <div class="form-grid">
+        <label class="field">
+            <span>Domain</span>
+            <input class="input" type="text" name="domain" value="{{ active_project.ad_domain }}" required>
+        </label>
+        <label class="field">
+            <span>DC IP / Hostname</span>
+            <input class="input" type="text" name="dc_ip" value="{{ active_project.ad_dc_ip }}" required>
+        </label>
+        <label class="field">
+            <span>Username</span>
+            <input class="input" type="text" name="username" placeholder="DOMAIN\\user or user@domain">
+        </label>
+        <label class="field">
+            <span>Password</span>
+            <input class="input" type="password" name="password">
+        </label>
+        <label class="field">
+            <span>NTLM Hashes</span>
+            <input class="input" type="text" name="hashes" placeholder="LM:NT or :NT">
+        </label>
+        <label class="field">
+            <span>AES Key</span>
+            <input class="input" type="text" name="aes_key" placeholder="Optional Kerberos AES key">
+        </label>
+        <label class="field">
+            <span>Auth Type</span>
+            <select class="select" name="auth_type">
+                <option value="ntlm">NTLM</option>
+                <option value="kerberos">Kerberos</option>
+                <option value="anonymous">Anonymous</option>
+            </select>
+        </label>
+        <label class="field">
+            <span>Output Types</span>
+            <select class="select" name="output_types">
+                {% for label, value in ad_output_type_options %}
+                <option value="{{ value }}">{{ label }}</option>
+                {% endfor %}
+            </select>
+        </label>
+        <label class="field">
+            <span>Throttle</span>
+            <input class="input" type="text" name="throttle" value="0.0">
+        </label>
+        <label class="field">
+            <span>Page Size</span>
+            <input class="input" type="number" min="1" name="page_size" value="500">
+        </label>
+        <label class="field full-span">
+            <span>Custom LDAP Filter</span>
+            <input class="input" type="text" name="ldap_filter" placeholder="Optional custom query filter">
+        </label>
+        <label class="checkbox-row full-span">
+            <input type="checkbox" name="use_ssl">
+            <span>Use LDAPS (port 636).</span>
+        </label>
+        <label class="checkbox-row full-span">
+            <input type="checkbox" name="no_sd">
+            <span>Skip ACL and security descriptor queries. Anonymous bind mode will force this on even if unchecked.</span>
+        </label>
+    </div>
+    <div class="button-row">
+        <button class="button" type="submit">Start AD Job</button>
+    </div>
+</form>
+
+{% include "job_panel.html" %}
+{% endblock %}

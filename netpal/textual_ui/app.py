@@ -41,6 +41,7 @@ from .helpers import (
     ALL_VIEWS,
     VIEW_AD_SCAN,
     VIEW_ASSETS,
+    VIEW_CREDENTIALS,
     VIEW_EVIDENCE,
     VIEW_FINDINGS,
     VIEW_HOSTS,
@@ -78,6 +79,12 @@ def _format_metric_line(*parts: str) -> str:
     return " | ".join(part for part in parts if part)
 
 
+AUTO_TOOL_CREDENTIAL_TYPE_OPTIONS = [
+    ("All", "all"),
+    ("Domain", "domain"),
+    ("Web", "web"),
+]
+
 _PROJECT_STATE_UNSET = object()
 _MEDIUM_NAV_LABELS = {
     VIEW_PROJECTS: "Projects",
@@ -89,6 +96,7 @@ _MEDIUM_NAV_LABELS = {
     VIEW_EVIDENCE: "AI",
     VIEW_AD_SCAN: "AD",
     VIEW_TESTCASES: "Tests",
+    VIEW_CREDENTIALS: "Creds",
     VIEW_SETTINGS: "Config",
 }
 _NARROW_NAV_LABELS = {
@@ -101,8 +109,34 @@ _NARROW_NAV_LABELS = {
     VIEW_EVIDENCE: "AI",
     VIEW_AD_SCAN: "AD",
     VIEW_TESTCASES: "TC",
+    VIEW_CREDENTIALS: "Cred",
     VIEW_SETTINGS: "Cfg",
 }
+
+
+def _normalize_credential_type(value: str) -> str:
+    normalized = str(value or "").strip().lower()
+    return normalized if normalized in {"all", "domain", "web"} else "all"
+
+
+def _credential_type_label(value: str) -> str:
+    return {
+        "all": "All",
+        "domain": "Domain",
+        "web": "Web",
+    }.get(_normalize_credential_type(value), "All")
+
+
+def _credential_password_mask(password: str) -> str:
+    return "********" if str(password or "").strip() else "-"
+
+
+def _boolish(value) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+    return bool(value)
 
 
 class StandardModalScreen(ModalScreen):
@@ -2629,6 +2663,346 @@ class TestCasesView(BaseNetPalView):
         self.refresh_view()
 
 
+class CreateCredentialScreen(StandardModalScreen):
+    """Modal screen for creating or editing an auto-tool credential."""
+
+    def __init__(self, credential: dict | None = None, credential_index: int | None = None) -> None:
+        super().__init__()
+        self._credential = dict(credential or {})
+        self._credential_index = credential_index
+
+    @property
+    def _is_editing(self) -> bool:
+        return self._credential_index is not None
+
+    def compose(self) -> ComposeResult:
+        with Vertical(classes="modal-shell modal-wide compact-form"):
+            yield Static("Edit Credential" if self._is_editing else "Create Credential", classes="section-title")
+            with DenseFormGrid():
+                with Horizontal():
+                    with Vertical():
+                        yield Label("Username")
+                        yield Input(
+                            id="cred-username",
+                            placeholder=r"e.g. CORP\svc-scan or admin",
+                            value=str(self._credential.get("username", "") or ""),
+                        )
+                    with Vertical():
+                        yield Label("Password")
+                        yield Input(
+                            id="cred-password",
+                            placeholder="Password",
+                            value=str(self._credential.get("password", "") or ""),
+                        )
+                with Horizontal():
+                    with Vertical():
+                        yield Label("Type")
+                        yield Select(
+                            AUTO_TOOL_CREDENTIAL_TYPE_OPTIONS,
+                            id="cred-type",
+                            value=_normalize_credential_type(self._credential.get("type", "all")),
+                            allow_blank=False,
+                        )
+                    with Vertical():
+                        yield Label("Use In Auto Tools")
+                        yield Select(
+                            [("Yes", True), ("No", False)],
+                            id="cred-use-auto-tools",
+                            value=_boolish(self._credential.get("use_in_auto_tools", True)),
+                            allow_blank=False,
+                        )
+            yield StatusLine(id="cred-status")
+            with ActionBar():
+                yield TextAction(
+                    "Save" if self._is_editing else "Create",
+                    id="btn-do-create-credential",
+                    variant="success",
+                )
+                yield TextAction("Cancel", id="btn-cancel-create-credential", variant="default")
+
+    @on(TextAction.Pressed, "#btn-do-create-credential")
+    def _handle_create(self, event: TextAction.Pressed) -> None:
+        self._create_credential()
+
+    @on(TextAction.Pressed, "#btn-cancel-create-credential")
+    def _handle_cancel(self, event: TextAction.Pressed) -> None:
+        self.dismiss(None)
+
+    def _create_credential(self) -> None:
+        status = self.query_one("#cred-status", Static)
+        username = self.query_one("#cred-username", Input).value.strip()
+        password = self.query_one("#cred-password", Input).value
+        cred_type = _normalize_credential_type(self.query_one("#cred-type", Select).value)
+        use_in_auto_tools = _boolish(self.query_one("#cred-use-auto-tools", Select).value)
+
+        if not username or not password:
+            status.update("[red]Username and password are required.[/]")
+            return
+
+        try:
+            credentials = _load_settings_document("creds.json")
+        except Exception as exc:
+            status.update(f"[red]Error loading creds.json: {exc}[/]")
+            return
+
+        if not isinstance(credentials, list):
+            status.update("[red]creds.json must contain a JSON list.[/]")
+            return
+
+        credential = {
+            "username": username,
+            "password": password,
+            "type": cred_type,
+            "use_in_auto_tools": use_in_auto_tools,
+        }
+        updated_credentials = list(credentials)
+        if self._is_editing and self._credential_index is not None:
+            if self._credential_index < 0 or self._credential_index >= len(updated_credentials):
+                status.update("[red]The selected credential no longer exists.[/]")
+                return
+            updated_credentials[self._credential_index] = credential
+        else:
+            updated_credentials.append(credential)
+
+        if not _save_settings_document("creds.json", updated_credentials):
+            status.update("[red]Failed to save creds.json.[/]")
+            return
+
+        self.dismiss(credential)
+
+
+class DeleteCredentialScreen(StandardModalScreen):
+    """Modal screen for confirming credential deletion."""
+
+    def __init__(self, credential: dict, credential_index: int) -> None:
+        super().__init__()
+        self._credential = dict(credential or {})
+        self._credential_index = credential_index
+
+    def compose(self) -> ComposeResult:
+        credential = self._credential
+        username = str(credential.get("username", "") or "-")
+        cred_type = _credential_type_label(credential.get("type", "all"))
+        auto_tools = "Yes" if _boolish(credential.get("use_in_auto_tools", False)) else "No"
+        with Vertical(classes="modal-shell modal-narrow compact-form"):
+            yield Static("Delete Credential", classes="section-title")
+            yield Static(
+                (
+                    f'Are you sure you want to delete credential "{username}" '
+                    f"({cred_type}, Auto Tools: {auto_tools})?"
+                ),
+                classes="modal-message",
+            )
+            yield StatusLine(id="delete-cred-status")
+            with ActionBar():
+                yield TextAction("Delete", id="btn-do-delete-credential", variant="error")
+                yield TextAction("Cancel", id="btn-cancel-delete-credential", variant="default")
+
+    @on(TextAction.Pressed, "#btn-do-delete-credential")
+    def _handle_delete(self, event: TextAction.Pressed) -> None:
+        self._do_delete()
+
+    @on(TextAction.Pressed, "#btn-cancel-delete-credential")
+    def _handle_cancel(self, event: TextAction.Pressed) -> None:
+        self.dismiss(None)
+
+    def _do_delete(self) -> None:
+        status = self.query_one("#delete-cred-status", Static)
+        credentials = _load_settings_document("creds.json")
+        if not isinstance(credentials, list):
+            status.update("[red]creds.json must contain a JSON list.[/]")
+            return
+        if self._credential_index < 0 or self._credential_index >= len(credentials):
+            status.update("[red]The selected credential no longer exists.[/]")
+            return
+
+        updated_credentials = list(credentials)
+        removed = updated_credentials.pop(self._credential_index)
+        if not _save_settings_document("creds.json", updated_credentials):
+            status.update("[red]Failed to save creds.json.[/]")
+            return
+
+        self.dismiss(removed)
+
+
+class CredentialsView(BaseNetPalView):
+    """Auto-tool credentials list and creation flow."""
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self._selected_credential_index: int | None = None
+
+    def compose(self) -> ComposeResult:
+        yield SectionHeader(
+            "Credentials",
+            "Manage local creds.json entries used by auto tools.",
+        )
+        yield MetricStrip("", id="credentials-metrics")
+        with ActionBar(id="credentials-action-bar"):
+            yield TextAction("Create Credential", id="btn-create-credential", variant="success")
+            yield TextAction(
+                "Edit Credential",
+                id="btn-edit-credential",
+                variant="primary",
+                disabled=True,
+            )
+            yield TextAction(
+                "Delete Credential",
+                id="btn-delete-credential",
+                variant="error",
+                disabled=True,
+            )
+        with Vertical(id="credentials-pane", classes="pane-box"):
+            yield SafeDataTable(id="credentials-table")
+        yield StatusLine(id="credentials-status")
+
+    def on_mount(self) -> None:
+        self.refresh_view()
+
+    def on_resize(self, event: events.Resize) -> None:
+        try:
+            self.refresh_view()
+        except Exception:
+            pass
+
+    def refresh_view(self) -> None:
+        self._refresh_table()
+
+    def _refresh_table(self) -> None:
+        table = self.query_one("#credentials-table", DataTable)
+        metrics = self.query_one("#credentials-metrics", MetricStrip)
+        status = self.query_one("#credentials-status", Static)
+        edit_button = self.query_one("#btn-edit-credential", TextAction)
+        delete_button = self.query_one("#btn-delete-credential", TextAction)
+        table.clear(columns=True)
+        table.cursor_type = "row"
+        status.update("")
+
+        # Use percentage-derived widths so the credential grid fills most of the viewport.
+        available_width = max(table.size.width or 0, self.app.size.width - 10, 72)
+        username_width = max(18, int(available_width * 0.32))
+        password_width = max(18, int(available_width * 0.32))
+        type_width = max(12, int(available_width * 0.16))
+        auto_width = max(14, int(available_width * 0.18))
+
+        table.add_column("Username", width=username_width)
+        table.add_column("Password", width=password_width)
+        table.add_column("Type", width=type_width)
+        table.add_column("Auto Tools", width=auto_width)
+
+        credentials = _load_settings_document("creds.json")
+        total = len(credentials) if isinstance(credentials, list) else 0
+        enabled_count = 0
+        if not isinstance(credentials, list):
+            status.update("[red]creds.json must contain a JSON list.[/]")
+            edit_button.disabled = True
+            delete_button.disabled = True
+            return
+
+        selected_index_is_valid = False
+        for index, credential in enumerate(credentials):
+            if not isinstance(credential, dict):
+                continue
+            enabled = _boolish(credential.get("use_in_auto_tools", False))
+            if enabled:
+                enabled_count += 1
+            if index == self._selected_credential_index:
+                selected_index_is_valid = True
+            table.add_row(
+                str(credential.get("username", "") or "-"),
+                str(credential.get("password", "") or "-"),
+                _credential_type_label(credential.get("type", "all")),
+                "Yes" if enabled else "No",
+                key=str(index),
+            )
+
+        if not selected_index_is_valid:
+            self._selected_credential_index = None
+        edit_button.disabled = self._selected_credential_index is None
+        delete_button.disabled = self._selected_credential_index is None
+
+        metrics.update(
+            _format_metric_line(
+                f"Credentials: {total}",
+                f"Enabled: {enabled_count}",
+            )
+        )
+
+    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
+        if event.data_table.id != "credentials-table":
+            return
+        if event.row_key is None or event.row_key.value is None:
+            return
+        self._selected_credential_index = int(str(event.row_key.value))
+        self.query_one("#btn-edit-credential", TextAction).disabled = False
+        self.query_one("#btn-delete-credential", TextAction).disabled = False
+
+    @on(TextAction.Pressed, "#btn-create-credential")
+    def _handle_create(self, event: TextAction.Pressed) -> None:
+        self.app.push_screen(CreateCredentialScreen(), self._on_create_dismissed)
+
+    @on(TextAction.Pressed, "#btn-edit-credential")
+    def _handle_edit(self, event: TextAction.Pressed) -> None:
+        credentials = _load_settings_document("creds.json")
+        if not isinstance(credentials, list) or self._selected_credential_index is None:
+            self.query_one("#credentials-status", Static).update("[yellow]Select a credential to edit.[/]")
+            return
+        if self._selected_credential_index < 0 or self._selected_credential_index >= len(credentials):
+            self.query_one("#credentials-status", Static).update("[yellow]Select a valid credential to edit.[/]")
+            return
+        credential = credentials[self._selected_credential_index]
+        if not isinstance(credential, dict):
+            self.query_one("#credentials-status", Static).update("[yellow]Select a valid credential to edit.[/]")
+            return
+        self.app.push_screen(
+            CreateCredentialScreen(credential=credential, credential_index=self._selected_credential_index),
+            self._on_edit_dismissed,
+        )
+
+    @on(TextAction.Pressed, "#btn-delete-credential")
+    def _handle_delete(self, event: TextAction.Pressed) -> None:
+        credentials = _load_settings_document("creds.json")
+        if not isinstance(credentials, list) or self._selected_credential_index is None:
+            self.query_one("#credentials-status", Static).update("[yellow]Select a credential to delete.[/]")
+            return
+        if self._selected_credential_index < 0 or self._selected_credential_index >= len(credentials):
+            self.query_one("#credentials-status", Static).update("[yellow]Select a valid credential to delete.[/]")
+            return
+        credential = credentials[self._selected_credential_index]
+        if not isinstance(credential, dict):
+            self.query_one("#credentials-status", Static).update("[yellow]Select a valid credential to delete.[/]")
+            return
+        self.app.push_screen(
+            DeleteCredentialScreen(credential, self._selected_credential_index),
+            self._on_delete_dismissed,
+        )
+
+    def _on_create_dismissed(self, credential) -> None:
+        if credential is None:
+            return
+        self.refresh_view()
+        self.query_one("#credentials-status", Static).update(
+            f"[green]Saved credential for {credential['username']} ({_credential_type_label(credential.get('type', 'all'))}).[/]"
+        )
+
+    def _on_edit_dismissed(self, credential) -> None:
+        if credential is None:
+            return
+        self.refresh_view()
+        self.query_one("#credentials-status", Static).update(
+            f"[green]Updated credential for {credential['username']} ({_credential_type_label(credential.get('type', 'all'))}).[/]"
+        )
+
+    def _on_delete_dismissed(self, credential) -> None:
+        if credential is None:
+            return
+        self._selected_credential_index = None
+        self.refresh_view()
+        self.query_one("#credentials-status", Static).update(
+            f"[green]Deleted credential for {credential['username']} ({_credential_type_label(credential.get('type', 'all'))}).[/]"
+        )
+
+
 class SettingsView(BaseNetPalView):
     """JSON config editor."""
 
@@ -2641,7 +3015,6 @@ class SettingsView(BaseNetPalView):
                     yield Select(
                         [
                             ("Primary Config (config.json)", "config.json"),
-                            ("Auto Tool Credentials (creds.json)", "creds.json"),
                             ("Recon Types (recon_types.json)", "recon_types.json"),
                             ("AI Prompts (ai_prompts.json)", "ai_prompts.json"),
                         ],
@@ -2764,6 +3137,7 @@ class NetPalApp(App):
             yield EvidenceView(id=VIEW_EVIDENCE, classes="view-container")
             yield ADScanView(id=VIEW_AD_SCAN, classes="view-container")
             yield TestCasesView(id=VIEW_TESTCASES, classes="view-container")
+            yield CredentialsView(id=VIEW_CREDENTIALS, classes="view-container")
             yield SettingsView(id=VIEW_SETTINGS, classes="view-container")
         yield Footer()
 
@@ -2840,7 +3214,7 @@ class NetPalApp(App):
             button.label = labels.get(view_id, VIEW_LABELS.get(view_id, view_id))
 
     def _allowed_views(self) -> set[str]:
-        allowed = {VIEW_PROJECTS, VIEW_SETTINGS}
+        allowed = {VIEW_PROJECTS, VIEW_CREDENTIALS, VIEW_SETTINGS}
         project = self.project
         if project is not None:
             allowed.add(VIEW_ASSETS)
@@ -2914,6 +3288,7 @@ class NetPalApp(App):
             VIEW_EVIDENCE: EvidenceView,
             VIEW_AD_SCAN: ADScanView,
             VIEW_TESTCASES: TestCasesView,
+            VIEW_CREDENTIALS: CredentialsView,
             VIEW_SETTINGS: SettingsView,
         }
         cls = view_map.get(view_id)
@@ -2955,6 +3330,9 @@ class NetPalApp(App):
 
     def action_goto_testcases(self) -> None:
         self._switch_to(VIEW_TESTCASES)
+
+    def action_goto_credentials(self) -> None:
+        self._switch_to(VIEW_CREDENTIALS)
 
     def action_goto_settings(self) -> None:
         self._switch_to(VIEW_SETTINGS)

@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% block title %}Recon | NetPal{% endblock %}
+{% block content %}
+<section class="page-header">
+    <div class="page-header-copy">
+        <p class="kicker">Recon</p>
+        <h1>Start Discovery and Scans</h1>
+        <p class="page-intro">Run the same recon workflow as the TUI, including discovered-host targeting, chunk files, auto-tools, exclusions, and custom nmap options.</p>
+    </div>
+</section>
+
+<form class="card" action="{{ url_for('recon_start') }}" method="post">
+    <div class="form-grid">
+        <label class="field">
+            <span>Target</span>
+            <select class="select" name="target" required>
+                <option value="">Select a target</option>
+                {% for label, value in target_options %}
+                <option value="{{ value }}">{{ label }}</option>
+                {% endfor %}
+            </select>
+        </label>
+        <label class="field">
+            <span>Scan Type</span>
+            <select class="select" id="recon-scan-type" name="scan_type" required>
+                {% for value, label in scan_types %}
+                <option value="{{ value }}" {% if value == "top100" %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
+        </label>
+        <label class="field full-span" id="recon-custom-group" hidden>
+            <span>Custom Nmap Options</span>
+            <input class="input" type="text" name="custom_options" placeholder="-p 8080,9090 -sV">
+        </label>
+        <label class="field">
+            <span>Interface</span>
+            <select class="select" name="interface">
+                <option value="">Use config default</option>
+                {% for iface, ip in interfaces %}
+                <option value="{{ iface }}">{{ iface }} ({{ ip }})</option>
+                {% endfor %}
+            </select>
+        </label>
+        <label class="field">
+            <span>Speed</span>
+            <select class="select" name="speed">
+                {% for speed in [1, 2, 3, 4, 5] %}
+                <option value="{{ speed }}" {% if speed == 3 %}selected{% endif %}>{{ speed }}</option>
+                {% endfor %}
+            </select>
+        </label>
+        <label class="field">
+            <span>Re-run Auto-Tools</span>
+            <select class="select" name="rerun_autotools">
+                {% for label, value in rerun_autotools_options %}
+                <option value="{{ value }}" {% if value == "2" %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
+        </label>
+        <label class="field">
+            <span>Exclude Targets</span>
+            <input class="input" type="text" name="exclude" value="{{ g.config.get('exclude', '') }}" placeholder="10.0.0.1,10.0.10.0/24">
+        </label>
+        <label class="field">
+            <span>Exclude Ports</span>
+            <input class="input" type="text" name="exclude_ports" value="{{ g.config.get('exclude-ports', '') }}" placeholder="22,3389">
+        </label>
+        <label class="field full-span">
+            <span>User Agent</span>
+            <input class="input" type="text" name="user_agent" value="{{ g.config.get('user-agent', '') }}" placeholder="Mozilla/5.0 ...">
+        </label>
+        <label class="checkbox-row full-span">
+            <input type="checkbox" name="skip_discovery" checked>
+            <span>Skip discovery (`-Pn`) when the selected scan type supports it.</span>
+        </label>
+        <label class="checkbox-row full-span">
+            <input type="checkbox" name="run_tools" checked>
+            <span>Run auto-tools after service discovery completes.</span>
+        </label>
+    </div>
+    <div class="button-row">
+        <button class="button" type="submit">Start Recon Job</button>
+    </div>
+</form>
+
+{% include "job_panel.html" %}
+{% endblock %}

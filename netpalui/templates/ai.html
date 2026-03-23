@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}AI | NetPal{% endblock %}
+{% block content %}
+<section class="page-header">
+    <div class="page-header-copy">
+        <p class="kicker">AI</p>
+        <h1>Review and Enhance</h1>
+        <p class="page-intro">Run AI review against collected evidence, then enhance the resulting findings in place.</p>
+    </div>
+</section>
+
+<section class="grid two-up">
+    <form class="card" action="{{ url_for('ai_start') }}" method="post">
+        <input type="hidden" name="mode" value="review">
+        <p class="kicker">Review</p>
+        <h2 class="card-title">Generate Findings</h2>
+        <p class="panel-copy">Current service count: {{ active_metrics.services }}</p>
+        <label class="field">
+            <span>Batch Size</span>
+            <input class="input" type="number" min="1" name="batch_size" value="5">
+        </label>
+        <div class="button-row">
+            <button class="button" type="submit">Start AI Review</button>
+        </div>
+    </form>
+
+    <form class="card" action="{{ url_for('ai_start') }}" method="post">
+        <input type="hidden" name="mode" value="enhance">
+        <p class="kicker">Enhance</p>
+        <h2 class="card-title">Expand Existing Findings</h2>
+        <p class="panel-copy">Current finding count: {{ active_metrics.findings }}</p>
+        <div class="note-box">
+            Enhancer mode reuses the saved findings and fills out missing detail the same way the TUI does.
+        </div>
+        <div class="button-row">
+            <button class="button secondary" type="submit">Start AI Enhancement</button>
+        </div>
+    </form>
+</section>
+
+{% include "job_panel.html" %}
+{% endblock %}

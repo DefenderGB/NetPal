@@ -52,17 +52,17 @@ Running `netpal` with no arguments shows the project dashboard and suggests the 
 
 Each subcommand has its own `--help` — run `netpal <command> --help` for detailed options and examples.
 
-An alternative interactive terminal UI is also available via `netpal interactive` (requires the `textual` package, `nmap`, and a working Playwright Chromium install). The current TUI is a dense operator-style dashboard built on Textual; its public entrypoint remains `netpal.tui`, while the internal implementation lives under `netpal/textual_ui/`.
+An alternative interactive terminal UI is also available via `netpal interactive` or `netpal tui` (requires the `textual` package, `nmap`, and a working Playwright Chromium install). The current TUI is a dense operator-style dashboard built on Textual; its public entrypoint remains `netpal.tui`, while the internal implementation lives under `netpal/textual_ui/`.
 
-The TUI can also be served as a web application in the browser via `netpal website` (uses `textual-serve` on port 7123 and performs the same `nmap`/Playwright startup check).
+The browser UI is available via `netpal website` and the compatibility alias `netpalui`. Both launch the Flask operator UI on port `5001` and perform the same `nmap`/Playwright startup check as `netpal interactive`.
 
 ```text
-usage: netpal [-h] [-p PROJECT] [-v] [-c CONFIG] {init,list,set,project-edit,assets,recon,recon-tools,ai-review,ai-report-enhance,setup,findings,hosts,export,delete,interactive,website,auto,ad-scan,testcase} ...
+usage: netpal [-h] [-p PROJECT] [-v] [-c CONFIG] {init,list,set,project-edit,assets,recon,recon-tools,ai-review,ai-report-enhance,setup,findings,hosts,export,delete,interactive,tui,website,auto,ad-scan,testcase} ...
 
 NetPal — Automated Network Penetration Testing CLI Tool
 
 positional arguments:
-  {init,list,set,project-edit,assets,recon,recon-tools,ai-review,ai-report-enhance,setup,findings,hosts,export,delete,interactive,website,auto,ad-scan,testcase}
+  {init,list,set,project-edit,assets,recon,recon-tools,ai-review,ai-report-enhance,setup,findings,hosts,export,delete,interactive,tui,website,auto,ad-scan,testcase}
                         Available commands
     init                Create a new project and set it as active
     list                List all local projects
@@ -79,7 +79,8 @@ positional arguments:
     export              Export project scan results as a zip archive
     delete              Delete a project and all its resources
     interactive         Launch the Textual-based interactive TUI
-    website             Serve the Textual TUI as a web application
+    tui                 Launch the Textual-based interactive TUI (alias)
+    website             Launch the Flask web operator UI
     auto                Fully automated scan pipeline (project → asset → discovery → recon → hosts)
     ad-scan             Run Active Directory LDAP scan (BloodHound output)
     testcase            Manage test case checklists for the active project
@@ -126,7 +127,8 @@ netpal setup
 
 # 2.a (Faster) Use interactive UI to create project, set AD metadata, optionally seed an asset, run recon, generate AI findings, and Enhance findings
 netpal interactive        # Terminal TUI
-netpal website            # Web UI on http://localhost:7123
+netpal tui                # Terminal TUI alias
+netpal website            # Web UI on http://localhost:5001
 
 # 2.b Create a project
 netpal init "My Pentest"
@@ -249,9 +251,10 @@ Auto tools can optionally pull credentials from a local `netpal/config/creds.jso
 - `netpal/config/creds.json` is gitignored and auto-created from the example the first time NetPal loads auto-tool credentials.
 
 - Each credential entry uses `username`, `password`, `type`, and `use_in_auto_tools`.
-- Supported credential `type` values are `domain` and `web`.
+- Supported credential `type` values are `all`, `domain`, and `web`.
 - Tool configs may add `cred_type` to restrict which enabled credentials are used. Omit it or set it to an empty string to try all enabled credential types.
 - Passwords are masked in MCP config resources and auto-tool command metadata, but remain stored in `creds.json` for execution.
+- In the Textual TUI, use the dedicated `Credentials` view to review and add entries instead of editing `creds.json` in `Settings`.
 
 Example `creds.json.example`:
 

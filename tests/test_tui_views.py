@@ -3,14 +3,16 @@ from unittest import mock
 from types import SimpleNamespace
 
 from textual.containers import VerticalScroll
-from textual.widgets import ContentSwitcher, Input, RichLog, Select, Static, TextArea
+from textual.widgets import ContentSwitcher, DataTable, Input, RichLog, Select, Static, TextArea
 
 from netpal.models.host import Host
 from netpal.models.project import Project
 from netpal.models.service import Service
 from netpal.tui import (
+    CreateCredentialScreen,
     CreateFindingScreen,
     CreateProjectScreen,
+    DeleteCredentialScreen,
     DetailPane,
     MetricStrip,
     NetPalApp,
@@ -18,6 +20,7 @@ from netpal.tui import (
     SettingsView,
     TextAction,
     VIEW_ASSETS,
+    VIEW_CREDENTIALS,
     VIEW_EVIDENCE,
     VIEW_HOSTS,
     VIEW_PROJECTS,
@@ -47,7 +50,7 @@ class TUIViewSmokeTests(unittest.IsolatedAsyncioTestCase):
                 app.project = None
                 app.config["project_name"] = ""
                 await pilot.pause()
-                self.assertEqual(app._allowed_views(), {VIEW_PROJECTS, VIEW_SETTINGS})
+                self.assertEqual(app._allowed_views(), {VIEW_PROJECTS, VIEW_CREDENTIALS, VIEW_SETTINGS})
 
                 project = Project(name="Smoke")
                 project.assets = [SimpleNamespace(asset_id=0, name="net", associated_host=[], type="network", get_identifier=lambda: "10.0.0.0/24")]
@@ -210,6 +213,8 @@ class TUIViewSmokeTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_settings_view_switches_between_editable_json_files(self):
         def load_document(filename: str):
+            if filename == "creds.json":
+                return [{"username": "demo", "password": "secret", "type": "all", "use_in_auto_tools": True}]
             if filename == "config.json":
                 return {"project_name": "Demo"}
             if filename == "recon_types.json":
@@ -238,6 +243,225 @@ class TUIViewSmokeTests(unittest.IsolatedAsyncioTestCase):
                 await pilot.pause()
 
                 self.assertIn('"id": "top100"', editor.text)
+
+    async def test_credentials_view_lists_visible_credentials_and_toolbar_actions(self):
+        def load_document(filename: str):
+            if filename == "creds.json":
+                return [
+                    {
+                        "username": r"CORP\tester",
+                        "password": "TopSecret!",
+                        "type": "all",
+                        "use_in_auto_tools": True,
+                    }
+                ]
+            if filename == "config.json":
+                return {"project_name": ""}
+            if filename == "recon_types.json":
+                return []
+            if filename == "ai_prompts.json":
+                return {}
+            raise AssertionError(filename)
+
+        with mock.patch("netpal.textual_ui.app._list_projects", return_value=[]), mock.patch(
+            "netpal.textual_ui.app._load_settings_document",
+            side_effect=load_document,
+        ):
+            app = NetPalApp()
+            app.config["project_name"] = ""
+
+            async with app.run_test(size=(120, 40)) as pilot:
+                app.action_goto_credentials()
+                await pilot.pause()
+
+                table = app.query_one("#credentials-table", DataTable)
+                self.assertEqual(table.row_count, 1)
+                row = table.get_row_at(0)
+                self.assertEqual(row[0], r"CORP\tester")
+                self.assertEqual(row[1], "TopSecret!")
+                self.assertEqual(row[2], "All")
+                self.assertEqual(row[3], "Yes")
+                table.cursor_coordinate = (0, 0)
+                table.action_select_cursor()
+                await pilot.pause()
+                self.assertFalse(app.query_one("#btn-edit-credential", TextAction).disabled)
+                self.assertFalse(app.query_one("#btn-delete-credential", TextAction).disabled)
+
+    async def test_credentials_view_edit_button_updates_selected_credential(self):
+        credentials = [
+            {
+                "username": r"CORP\tester",
+                "password": "TopSecret!",
+                "type": "domain",
+                "use_in_auto_tools": False,
+            }
+        ]
+
+        def load_document(filename: str):
+            if filename == "creds.json":
+                return list(credentials)
+            if filename == "config.json":
+                return {"project_name": ""}
+            if filename == "recon_types.json":
+                return []
+            if filename == "ai_prompts.json":
+                return {}
+            raise AssertionError(filename)
+
+        def save_document(filename: str, data):
+            self.assertEqual(filename, "creds.json")
+            credentials[:] = data
+            return True
+
+        with mock.patch("netpal.textual_ui.app._list_projects", return_value=[]), mock.patch(
+            "netpal.textual_ui.app._load_settings_document",
+            side_effect=load_document,
+        ), mock.patch(
+            "netpal.textual_ui.app._save_settings_document",
+            side_effect=save_document,
+        ):
+            app = NetPalApp()
+            app.config["project_name"] = ""
+
+            async with app.run_test(size=(120, 40)) as pilot:
+                app.action_goto_credentials()
+                await pilot.pause()
+
+                table = app.query_one("#credentials-table", DataTable)
+                table.cursor_coordinate = (0, 0)
+                table.action_select_cursor()
+                await pilot.pause()
+
+                self.assertFalse(app.query_one("#btn-edit-credential", TextAction).disabled)
+                await pilot.click("#btn-edit-credential")
+                await pilot.pause()
+
+                self.assertIsInstance(app.screen_stack[-1], CreateCredentialScreen)
+                modal = app.screen
+                self.assertEqual(modal.query_one("#cred-password", Input).value, "TopSecret!")
+                modal.query_one("#cred-password", Input).value = "ChangedSecret!"
+                modal.query_one("#cred-use-auto-tools", Select).value = True
+
+                await pilot.click("#btn-do-create-credential")
+                await pilot.pause()
+
+                self.assertEqual(credentials[0]["password"], "ChangedSecret!")
+                self.assertTrue(credentials[0]["use_in_auto_tools"])
+                row = app.query_one("#credentials-table", DataTable).get_row_at(0)
+                self.assertEqual(row[1], "ChangedSecret!")
+                self.assertEqual(row[3], "Yes")
+                self.assertIn("Updated credential", str(app.query_one("#credentials-status").render()))
+
+    async def test_credentials_view_create_button_saves_new_credential(self):
+        credentials = []
+
+        def load_document(filename: str):
+            if filename == "creds.json":
+                return list(credentials)
+            if filename == "config.json":
+                return {"project_name": ""}
+            if filename == "recon_types.json":
+                return []
+            if filename == "ai_prompts.json":
+                return {}
+            raise AssertionError(filename)
+
+        def save_document(filename: str, data):
+            self.assertEqual(filename, "creds.json")
+            credentials[:] = data
+            return True
+
+        with mock.patch("netpal.textual_ui.app._list_projects", return_value=[]), mock.patch(
+            "netpal.textual_ui.app._load_settings_document",
+            side_effect=load_document,
+        ), mock.patch(
+            "netpal.textual_ui.app._save_settings_document",
+            side_effect=save_document,
+        ):
+            app = NetPalApp()
+            app.config["project_name"] = ""
+
+            async with app.run_test(size=(120, 40)) as pilot:
+                app.action_goto_credentials()
+                await pilot.pause()
+
+                await pilot.click("#btn-create-credential")
+                await pilot.pause()
+                self.assertIsInstance(app.screen_stack[-1], CreateCredentialScreen)
+
+                modal = app.screen
+                modal.query_one("#cred-username", Input).value = "admin"
+                modal.query_one("#cred-password", Input).value = "Summer2026!"
+                modal.query_one("#cred-type", Select).value = "all"
+                modal.query_one("#cred-use-auto-tools", Select).value = True
+
+                await pilot.click("#btn-do-create-credential")
+                await pilot.pause()
+
+                self.assertEqual(len(credentials), 1)
+                self.assertEqual(credentials[0]["username"], "admin")
+                self.assertEqual(credentials[0]["type"], "all")
+                self.assertTrue(credentials[0]["use_in_auto_tools"])
+                self.assertEqual(app.query_one("#credentials-table", DataTable).row_count, 1)
+                self.assertIn("Saved credential for admin", str(app.query_one("#credentials-status").render()))
+
+    async def test_credentials_view_delete_button_removes_selected_credential(self):
+        credentials = [
+            {
+                "username": "admin",
+                "password": "Summer2026!",
+                "type": "all",
+                "use_in_auto_tools": True,
+            }
+        ]
+
+        def load_document(filename: str):
+            if filename == "creds.json":
+                return list(credentials)
+            if filename == "config.json":
+                return {"project_name": ""}
+            if filename == "recon_types.json":
+                return []
+            if filename == "ai_prompts.json":
+                return {}
+            raise AssertionError(filename)
+
+        def save_document(filename: str, data):
+            self.assertEqual(filename, "creds.json")
+            credentials[:] = data
+            return True
+
+        with mock.patch("netpal.textual_ui.app._list_projects", return_value=[]), mock.patch(
+            "netpal.textual_ui.app._load_settings_document",
+            side_effect=load_document,
+        ), mock.patch(
+            "netpal.textual_ui.app._save_settings_document",
+            side_effect=save_document,
+        ):
+            app = NetPalApp()
+            app.config["project_name"] = ""
+
+            async with app.run_test(size=(120, 40)) as pilot:
+                app.action_goto_credentials()
+                await pilot.pause()
+
+                table = app.query_one("#credentials-table", DataTable)
+                table.cursor_coordinate = (0, 0)
+                table.action_select_cursor()
+                await pilot.pause()
+
+                await pilot.click("#btn-delete-credential")
+                await pilot.pause()
+                self.assertIsInstance(app.screen_stack[-1], DeleteCredentialScreen)
+
+                await pilot.click("#btn-do-delete-credential")
+                await pilot.pause()
+
+                self.assertEqual(credentials, [])
+                self.assertEqual(app.query_one("#credentials-table", DataTable).row_count, 0)
+                self.assertIn("Deleted credential for admin", str(app.query_one("#credentials-status").render()))
+                self.assertTrue(app.query_one("#btn-edit-credential", TextAction).disabled)
+                self.assertTrue(app.query_one("#btn-delete-credential", TextAction).disabled)
 
     async def test_select_controls_render_as_single_line_compact_dropdowns(self):
         with mock.patch("netpal.textual_ui.app._list_projects", return_value=[]):

@@ -83,7 +83,7 @@ netpal/
 ├── __init__.py
 ├── __main__.py                    # Entry: calls cli.main()
 ├── cli.py                         # CLI parser, routing, dashboard, bootstrap
-├── tui.py                         # Public TUI shim / entrypoint — netpal interactive
+├── tui.py                         # Public TUI shim / entrypoint — netpal interactive / netpal tui
 ├── textual_ui/                    # Internal Textual operator UI package
 │   ├── app.py                     # App, modal, and view implementation
 │   ├── components.py              # Shared TUI primitives
@@ -327,11 +327,12 @@ The file contents are a JSON list:
 
 Rules:
 
-- `type` must be `domain` or `web`
+- `type` must be `all`, `domain`, or `web`
 - `use_in_auto_tools: true` is required for the credential to be considered
 - If a tool command includes `{username}` or `{password}`, NetPal runs that tool once per matching enabled credential
 - Tool configs may add `cred_type: "domain"` or `cred_type: "web"` to limit which credentials are used
 - If `cred_type` is omitted or empty, all enabled credentials are eligible
+- In the Textual TUI, credentials are managed from the dedicated `Credentials` view rather than the generic `Settings` JSON editor
 
 Example:
 
@@ -383,7 +384,7 @@ In the TUI, a "Re-run auto-tools" dropdown provides the same options (2 days, 7 
 
 ## Interactive TUI (`tui.py` / `textual_ui/`)
 
-The TUI (`netpal interactive`) uses Textual and provides a state-driven, non-linear interface with project editing, assets, recon, tools, hosts, manual findings, AI enhancement, AD scan, testcase tracking, and settings. Views unlock progressively based on project state. Startup now fails fast if required runtime tools (`nmap` or Playwright/Chromium) are unavailable, and the project-creation modal can capture AD metadata plus optionally seed an initial asset from just an asset type and target.
+The TUI (`netpal interactive` / `netpal tui`) uses Textual and provides a state-driven, non-linear interface with project editing, assets, recon, tools, hosts, manual findings, AI enhancement, AD scan, testcase tracking, credentials management, and settings. Views unlock progressively based on project state. Startup now fails fast if required runtime tools (`nmap` or Playwright/Chromium) are unavailable, and the project-creation modal can capture AD metadata plus optionally seed an initial asset from just an asset type and target.
 
 `netpal/tui.py` is the stable public shim for CLI entrypoints, tests, and `python -m netpal.tui`. The actual Textual implementation now lives under `netpal/textual_ui/`.
 
@@ -409,7 +410,8 @@ To add a new TUI view:
 
 Before submitting changes:
 - Verify `python -m compileall netpal netpalui` passes on modified areas
-- Verify `uv run netpal --help`, `uv run netpal interactive --help`, `uv run netpal ad-scan --help`, and `uv run netpal testcase --help`
+- Verify `uv run netpal --help`, `uv run netpal interactive --help`, `uv run netpal tui --help`, `uv run netpal ad-scan --help`, and `uv run netpal testcase --help`
+- Verify `uv run netpal website --help` and the Flask web UI entrypoint still reflect the current workflow
 - Test affected subcommands end-to-end
 - Verify `--help` output is correct
 - Check next-command suggestions print for relevant transitions

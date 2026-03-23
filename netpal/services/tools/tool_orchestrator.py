@@ -134,7 +134,7 @@ class ToolOrchestrator:
             tool_runs = self._build_tool_runs(tool, auto_tool_credentials or [])
             if not tool_runs:
                 if callback:
-                    cred_type = self._normalize_credential_type(tool.get("cred_type", "")) or "all"
+                    cred_type = self._normalize_tool_credential_type(tool.get("cred_type", "")) or "all"
                     callback(
                         f"\n[ERROR] {tool.get('tool_name', 'Unknown')} skipped on "
                         f"{host.ip}:{service.port}: no matching auto-tool credentials "
@@ -202,9 +202,15 @@ class ToolOrchestrator:
 
     @staticmethod
     def _normalize_credential_type(value: str) -> str:
-        """Normalize a credential type to '', 'domain', or 'web'."""
+        """Normalize a stored credential type to 'all', 'domain', or 'web'."""
         normalized = str(value or "").strip().lower()
-        return normalized if normalized in {"domain", "web"} else ""
+        return normalized if normalized in {"all", "domain", "web"} else "all"
+
+    @classmethod
+    def _normalize_tool_credential_type(cls, value: str) -> str:
+        """Normalize a tool cred_type to '', 'domain', or 'web'."""
+        normalized = cls._normalize_credential_type(value)
+        return "" if normalized == "all" else normalized
 
     @staticmethod
     def _boolish(value) -> bool:
@@ -226,7 +232,7 @@ class ToolOrchestrator:
         cred_type = cls._normalize_credential_type(credential.get("type", ""))
         use_in_auto_tools = cls._boolish(credential.get("use_in_auto_tools", False))
 
-        if not use_in_auto_tools or not username or not password or not cred_type:
+        if not use_in_auto_tools or not username or not password:
             return None
 
         digest = hashlib.sha256(
@@ -254,13 +260,13 @@ class ToolOrchestrator:
         if not cls._tool_uses_credentials(tool):
             return [tool]
 
-        desired_type = cls._normalize_credential_type(tool.get("cred_type", ""))
+        desired_type = cls._normalize_tool_credential_type(tool.get("cred_type", ""))
         runs = []
         for credential in credentials:
             normalized = cls._normalize_auto_tool_credential(credential)
             if not normalized:
                 continue
-            if desired_type and normalized["type"] != desired_type:
+            if desired_type and normalized["type"] not in {desired_type, "all"}:
                 continue
 
             tool_run = dict(tool)

@@ -1,0 +1,181 @@
+{% extends "base.html" %}
+{% block title %}Findings | NetPal{% endblock %}
+{% block content %}
+<section class="page-header">
+    <div class="page-header-copy">
+        <p class="kicker">Findings</p>
+        <h1>Findings and Manual Entries</h1>
+        <p class="page-intro">Review current findings and add manual findings with host, port, proof-file, CVSS, CWE, impact, and remediation details.</p>
+    </div>
+    <div class="page-header-actions">
+        <button type="button" class="button" data-modal-open="create-finding-modal">Create Finding</button>
+        <a href="{{ url_for('ai_page') }}" class="button quiet">Open AI</a>
+    </div>
+</section>
+
+<section class="grid two-up">
+    <section class="card">
+        <p class="kicker">Current Findings</p>
+        <h2 class="card-title">Recorded Findings</h2>
+        {% if rows %}
+        <div class="table-wrap">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Severity</th>
+                        <th>Name</th>
+                        <th>Host</th>
+                        <th>Port</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in rows %}
+                    <tr>
+                        <td><span class="tag {{ severity_color(row.finding.severity) }}">{{ row.finding.severity }}</span></td>
+                        <td><a href="{{ url_for('findings_page', finding_id=row.finding.finding_id) }}">{{ row.finding.name }}</a></td>
+                        <td>{{ row.host_label }}</td>
+                        <td>{{ row.finding.port }}</td>
+                        <td>
+                            <form class="inline-form" action="{{ url_for('findings_delete') }}" method="post" onsubmit="return confirm('Delete this finding?');">
+                                <input type="hidden" name="finding_id" value="{{ row.finding.finding_id }}">
+                                <button class="button danger tiny" type="submit">Delete</button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <p class="field-hint">No findings recorded yet.</p>
+        {% endif %}
+    </section>
+    <section class="card">
+        <p class="kicker">Selected</p>
+        {% if selected_finding %}
+        <div class="detail-header">
+            <div>
+                <div class="tag-list">
+                    <span class="tag {{ severity_color(selected_finding.severity) }}">{{ selected_finding.severity }}</span>
+                    {% if selected_finding.cvss is not none %}
+                    <span class="tag">CVSS {{ selected_finding.cvss }}</span>
+                    {% endif %}
+                    {% if selected_finding.cwe %}
+                    <span class="tag">{{ selected_finding.cwe }}</span>
+                    {% endif %}
+                </div>
+                <h2 class="card-title">{{ selected_finding.name }}</h2>
+            </div>
+            <span class="mono">ID {{ selected_finding.finding_id }}</span>
+        </div>
+        {% if selected_finding.description %}
+        <div class="detail-block">
+            <h4>Description</h4>
+            <p>{{ selected_finding.description }}</p>
+        </div>
+        {% endif %}
+        {% if selected_finding.impact %}
+        <div class="detail-block">
+            <h4>Impact</h4>
+            <p>{{ selected_finding.impact }}</p>
+        </div>
+        {% endif %}
+        {% if selected_finding.remediation %}
+        <div class="detail-block">
+            <h4>Remediation</h4>
+            <p>{{ selected_finding.remediation }}</p>
+        </div>
+        {% endif %}
+        {% if selected_finding.proof_file %}
+        <div class="tag-list">
+            {% for proof_path in selected_finding.proof_file.split(",") %}
+                {% set clean_path = proof_path.strip() %}
+                {% if clean_path %}
+                <a href="{{ url_for('serve_file', filepath=clean_path) }}" class="tag" target="_blank">{{ clean_path.split("/")[-1] }}</a>
+                {% endif %}
+            {% endfor %}
+        </div>
+        {% endif %}
+        {% else %}
+        <h2 class="card-title">No finding selected</h2>
+        <p class="panel-copy">Pick a finding from the table to inspect it.</p>
+        {% endif %}
+    </section>
+</section>
+
+<div id="create-finding-modal" class="modal-shell" hidden>
+    <div class="modal-backdrop" data-modal-close="create-finding-modal"></div>
+    <div class="modal-card medium">
+        <div class="modal-header">
+            <div>
+                <p class="kicker">Create</p>
+                <h2 class="card-title">Manual Finding</h2>
+                <p class="panel-copy">Capture an operator-authored finding with host, port, severity, narrative detail, and any saved proof files.</p>
+            </div>
+            <button type="button" class="modal-close" data-modal-close="create-finding-modal">&times;</button>
+        </div>
+        <form action="{{ url_for('findings_create') }}" method="post">
+            <div class="form-grid">
+                <label class="field">
+                    <span>Host</span>
+                    <select class="select" id="finding-host-select" name="host_id" required>
+                        <option value="">Select a host</option>
+                        {% for host in finding_form_payload.hosts %}
+                        <option value="{{ host.id }}">{{ host.label }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+                <label class="field">
+                    <span>Port</span>
+                    <select class="select" id="finding-port-select" name="port">
+                        <option value="">Select a host first</option>
+                    </select>
+                </label>
+                <label class="field full-span">
+                    <span>Name</span>
+                    <input class="input" type="text" name="name" required>
+                </label>
+                <label class="field">
+                    <span>Severity</span>
+                    <select class="select" name="severity">
+                        {% for severity in ["Critical", "High", "Medium", "Low", "Info"] %}
+                        <option value="{{ severity }}" {% if severity == "Medium" %}selected{% endif %}>{{ severity }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+                <label class="field">
+                    <span>CVSS</span>
+                    <input class="input" type="text" name="cvss" placeholder="7.5">
+                </label>
+                <label class="field full-span">
+                    <span>CWE</span>
+                    <input class="input" type="text" name="cwe" placeholder="CWE-79">
+                </label>
+                <label class="field full-span">
+                    <span>Description</span>
+                    <textarea class="textarea" name="description" rows="4" required></textarea>
+                </label>
+                <label class="field full-span">
+                    <span>Impact</span>
+                    <textarea class="textarea" name="impact" rows="3" required></textarea>
+                </label>
+                <label class="field full-span">
+                    <span>Remediation</span>
+                    <textarea class="textarea" name="remediation" rows="4" required></textarea>
+                </label>
+                <div class="field full-span">
+                    <span>Proof Files</span>
+                    <div id="finding-proof-files" class="stack"></div>
+                </div>
+            </div>
+            <div class="button-row">
+                <button class="button" type="submit">Create Finding</button>
+                <button class="button quiet" type="button" data-modal-close="create-finding-modal">Cancel</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script id="finding-form-data" type="application/json">{{ finding_form_data | safe }}</script>
+{% endblock %}

@@ -13,200 +13,89 @@ from textual.widgets import DataTable, Select
 
 
 def _load_config():
-    from netpal.utils.config_loader import ConfigLoader
+    from netpal.utils.operator_actions import load_config
 
-    return ConfigLoader.load_config_json()
+    return load_config()
 
 
 def _save_config(config_dict: dict) -> bool:
     """Persist *config_dict* to ``config/config.json``."""
-    from netpal.utils.config_loader import ConfigLoader
+    from netpal.utils.operator_actions import save_config
 
-    config_path = ConfigLoader.get_config_path("config.json")
-    try:
-        with open(config_path, "w", encoding="utf-8") as fh:
-            json.dump(config_dict, fh, indent=2)
-        return True
-    except Exception as exc:
-        from netpal.utils.logger import get_logger
-
-        get_logger(__name__).error("Failed to save config: %s", exc)
-        return False
+    return save_config(config_dict)
 
 
 def _load_settings_document(filename: str):
-    """Load one of the editable JSON documents exposed in the TUI settings view."""
-    from netpal.utils.config_loader import ConfigLoader
+    """Load one of the JSON documents used by the TUI config surfaces."""
+    from netpal.utils.operator_actions import load_settings_document
 
-    if filename == "config.json":
-        return ConfigLoader.load_config_json()
-    if filename == "creds.json":
-        return ConfigLoader.load_auto_tool_credentials()
-    if filename == "recon_types.json":
-        return ConfigLoader.load_recon_types()
-    if filename == "ai_prompts.json":
-        return ConfigLoader.load_ai_prompts()
-    raise ValueError(f"Unsupported settings document: {filename}")
+    return load_settings_document(filename)
 
 
 def _save_settings_document(filename: str, data) -> bool:
-    """Persist one of the editable JSON documents exposed in the TUI settings view."""
-    from netpal.utils.config_loader import ConfigLoader
+    """Persist one of the JSON documents used by the TUI config surfaces."""
+    from netpal.utils.operator_actions import save_settings_document
 
-    if filename == "config.json":
-        ConfigLoader.ensure_config_exists()
-
-    config_path = Path(ConfigLoader.get_config_path(filename))
-    try:
-        config_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(config_path, "w", encoding="utf-8") as fh:
-            json.dump(data, fh, indent=2)
-        return True
-    except Exception as exc:
-        from netpal.utils.logger import get_logger
-
-        get_logger(__name__).error("Failed to save %s: %s", filename, exc)
-        return False
+    return save_settings_document(filename, data)
 
 
 def _list_projects():
-    from netpal.utils.persistence.file_utils import list_registered_projects
+    from netpal.utils.operator_actions import list_projects
 
-    return list_registered_projects()
+    return list_projects()
 
 
 def _load_project(name: str):
-    from netpal.models.project import Project
+    from netpal.utils.operator_actions import load_project_by_name
 
-    return Project.load_from_file(name)
+    return load_project_by_name(name)
 
 
 def _set_active_project(name: str, config: dict):
-    from netpal.utils.config_loader import ConfigLoader
+    from netpal.utils.operator_actions import set_active_project
 
-    ConfigLoader.update_config_project_name(name)
-    config["project_name"] = name
+    set_active_project(name, config)
 
 
 def _load_findings_for_project(project):
     """Return the project with its findings list populated."""
-    from netpal.models.finding import Finding
-    from netpal.utils.persistence.file_utils import get_findings_path, load_json
-
-    findings_path = get_findings_path(project.project_id)
-    findings_data = load_json(findings_path, default=[])
-    project.findings = [Finding.from_dict(f) for f in findings_data]
     return project
 
 
 def _get_interfaces_with_valid_ips():
     """Return interfaces that have an assigned IP, similar to setup_wizard."""
-    from netpal.utils.validation import get_interfaces_with_ips
+    from netpal.utils.operator_actions import get_interfaces_with_valid_ips
 
-    return [(iface, ip) for iface, ip in get_interfaces_with_ips() if ip]
+    return get_interfaces_with_valid_ips()
 
 
 def _starter_asset_target_prompt(asset_type) -> tuple[str, str, bool]:
     """Return label, placeholder, and enabled-state for the starter asset input."""
-    if asset_type in (None, "", Select.BLANK):
-        return (
-            "Asset Target (optional)",
-            "Select an asset type to add an initial asset",
-            False,
-        )
+    from netpal.utils.operator_actions import starter_asset_target_prompt
 
-    asset_type = str(asset_type)
-    if asset_type == "network":
-        return ("Asset Target (CIDR)", "e.g. 10.0.0.0/24", True)
-    if asset_type == "single":
-        return ("Asset Target (host/IP)", "e.g. 10.0.0.10 or app.example.com", True)
-    if asset_type == "list":
-        return (
-            "Asset Target (.txt path or comma-list)",
-            "e.g. 10.0.0.10,10.0.0.11 or /tmp/targets.txt",
-            True,
-        )
-    return ("Asset Target", "Enter an asset target", True)
+    if asset_type in (None, "", Select.BLANK):
+        asset_type = None
+    else:
+        asset_type = str(asset_type)
+    return starter_asset_target_prompt(asset_type)
 
 
 def _build_starter_asset_name(asset_type: str, asset_target: str) -> str:
     """Build a human-readable default name for a starter asset."""
-    asset_type = str(asset_type)
-    target = asset_target.strip()
+    from netpal.utils.operator_actions import build_starter_asset_name
 
-    if asset_type == "list":
-        if target.lower().endswith(".txt"):
-            summary = os.path.basename(os.path.expanduser(target))
-        else:
-            targets = [item.strip() for item in target.split(",") if item.strip()]
-            summary = targets[0] if targets else "targets"
-            if len(targets) > 1:
-                summary += " +more"
-        prefix = "List"
-    elif asset_type == "network":
-        summary = target
-        prefix = "Network"
-    elif asset_type == "single":
-        summary = target
-        prefix = "Target"
-    else:
-        summary = target or "asset"
-        prefix = "Asset"
-
-    if len(summary) > 40:
-        summary = summary[:37] + "..."
-
-    return f"{prefix} {summary}".strip()
+    return build_starter_asset_name(asset_type, asset_target)
 
 
 def _prepare_starter_asset(asset_type, asset_target: str):
     """Validate and normalize the optional starter asset from project creation."""
-    target = asset_target.strip()
+    from netpal.utils.operator_actions import prepare_starter_asset
 
     if asset_type in (None, "", Select.BLANK):
-        if target:
-            raise ValueError("Select an asset type or clear the asset target.")
-        return None
-
-    asset_type = str(asset_type)
-    if not target:
-        raise ValueError("Asset target is required when an asset type is selected.")
-
-    if asset_type == "network":
-        from netpal.utils.network_utils import validate_cidr
-
-        is_valid, error_msg = validate_cidr(target)
-        if not is_valid:
-            raise ValueError(error_msg)
-        target_data = target
-    elif asset_type == "single":
-        from netpal.utils.validation import validate_target
-
-        is_valid, _, error_msg = validate_target(target)
-        if not is_valid:
-            raise ValueError(error_msg)
-        target_data = target
-    elif asset_type == "list":
-        if target.lower().endswith(".txt"):
-            file_path = os.path.abspath(os.path.expanduser(target))
-            if not os.path.isfile(file_path):
-                raise ValueError(f"File not found: {file_path}")
-            target_data = {"file": file_path}
-        else:
-            targets = [item.strip() for item in target.split(",") if item.strip()]
-            if not targets:
-                raise ValueError(
-                    "List asset target must be a .txt file path or comma-separated targets."
-                )
-            target_data = ",".join(targets)
+        asset_type = None
     else:
-        raise ValueError(f"Unknown asset type: {asset_type}")
-
-    return {
-        "type": asset_type,
-        "name": _build_starter_asset_name(asset_type, target),
-        "target_data": target_data,
-    }
+        asset_type = str(asset_type)
+    return prepare_starter_asset(asset_type, asset_target)
 
 
 def _severity_color(severity: str) -> str:
@@ -242,34 +131,9 @@ def _host_label(host, duplicate_ips: set[str] | None = None) -> str:
 
 def _get_path_suggestions(value: str, limit: int = 5) -> list[str]:
     """Return up to *limit* filesystem paths matching *value*."""
-    if not value:
-        return []
-    p = Path(value)
-    try:
-        if p.is_dir():
-            children = sorted(p.iterdir())
-            parent_str = str(p)
-            if not parent_str.endswith(os.sep):
-                parent_str += os.sep
-            return [
-                parent_str + c.name + ("/" if c.is_dir() else "")
-                for c in children
-                if not c.name.startswith(".")
-            ][:limit]
-        parent = p.parent
-        partial = p.name
-        if parent.is_dir():
-            matches = sorted(
-                c for c in parent.iterdir()
-                if c.name.startswith(partial) and not c.name.startswith(".")
-            )
-            return [
-                str(parent / m.name) + ("/" if m.is_dir() else "")
-                for m in matches
-            ][:limit]
-    except PermissionError:
-        pass
-    return []
+    from netpal.utils.operator_actions import get_path_suggestions
+
+    return get_path_suggestions(value, limit=limit)
 
 
 @contextmanager
@@ -389,6 +253,7 @@ VIEW_FINDINGS = "view-findings"
 VIEW_EVIDENCE = "view-evidence"
 VIEW_AD_SCAN = "view-ad-scan"
 VIEW_TESTCASES = "view-testcases"
+VIEW_CREDENTIALS = "view-credentials"
 VIEW_SETTINGS = "view-settings"
 
 ALL_VIEWS = [
@@ -401,6 +266,7 @@ ALL_VIEWS = [
     VIEW_EVIDENCE,
     VIEW_AD_SCAN,
     VIEW_TESTCASES,
+    VIEW_CREDENTIALS,
     VIEW_SETTINGS,
 ]
 
@@ -414,6 +280,7 @@ VIEW_LABELS = {
     VIEW_EVIDENCE: "AI Enhance",
     VIEW_AD_SCAN: "AD Scan",
     VIEW_TESTCASES: "Test Cases",
+    VIEW_CREDENTIALS: "Credentials",
     VIEW_SETTINGS: "Settings",
 }
 

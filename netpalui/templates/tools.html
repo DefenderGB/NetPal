@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}Tools | NetPal{% endblock %}
+{% block content %}
+<section class="page-header">
+    <div class="page-header-copy">
+        <p class="kicker">Tools</p>
+        <h1>Auto-Tool Execution</h1>
+        <p class="page-intro">Run Playwright, nuclei, NSE, and HTTP tooling against all discovered hosts, a single asset, or an individual host.</p>
+    </div>
+</section>
+
+<form class="card" action="{{ url_for('tools_start') }}" method="post">
+    <div class="form-grid">
+        <label class="field">
+            <span>Target</span>
+            <select class="select" name="target" required>
+                <option value="">Select a target</option>
+                {% for label, value in target_options %}
+                <option value="{{ value }}">{{ label }}</option>
+                {% endfor %}
+            </select>
+        </label>
+        <label class="field">
+            <span>Tool</span>
+            <select class="select" name="tool_name" required>
+                {% for label, value in tool_options %}
+                <option value="{{ value }}">{{ label }}</option>
+                {% endfor %}
+            </select>
+        </label>
+        <label class="field">
+            <span>Port or Service Filter</span>
+            <input class="input" type="text" name="port_service_filter" placeholder="80 or http">
+        </label>
+        <label class="field">
+            <span>Re-run Auto-Tools</span>
+            <select class="select" name="rerun_autotools">
+                {% for label, value in rerun_autotools_options %}
+                <option value="{{ value }}" {% if value == "2" %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+            </select>
+        </label>
+    </div>
+    <div class="button-row">
+        <button class="button" type="submit">Start Tool Job</button>
+    </div>
+</form>
+
+{% include "job_panel.html" %}
+{% endblock %}

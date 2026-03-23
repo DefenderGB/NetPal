@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+{% block title %}Hosts | NetPal{% endblock %}
+{% block content %}
+<section class="page-header">
+    <div class="page-header-copy">
+        <p class="kicker">Hosts</p>
+        <h1>Discovered Hosts and Evidence</h1>
+        <p class="page-intro">Review discovered services, asset membership, proof files, and screenshots from the active project.</p>
+    </div>
+</section>
+
+<section class="grid two-up">
+    <section class="card">
+        <p class="kicker">Inventory</p>
+        <h2 class="card-title">Hosts</h2>
+        {% if rows %}
+        <div class="table-wrap">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Host</th>
+                        <th>Asset</th>
+                        <th>Services</th>
+                        <th>Findings</th>
+                        <th>Proofs</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in rows %}
+                    <tr>
+                        <td><a href="{{ url_for('hosts_page', host_id=row.host.host_id) }}">{{ row.label }}</a></td>
+                        <td>{{ row.asset_name }}</td>
+                        <td>{{ row.services }}</td>
+                        <td>{{ row.findings }}</td>
+                        <td>{{ row.tools }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <p class="field-hint">No discovered hosts yet.</p>
+        {% endif %}
+    </section>
+
+    <section class="card">
+        <p class="kicker">Detail</p>
+        {% if selected_host_detail %}
+        <h2 class="card-title">{{ selected_host_detail.host.ip }}</h2>
+        <dl class="key-values">
+            {% if selected_host_detail.host.hostname %}
+            <div>
+                <dt>Hostname</dt>
+                <dd>{{ selected_host_detail.host.hostname }}</dd>
+            </div>
+            {% endif %}
+            {% if selected_host_detail.host.os %}
+            <div>
+                <dt>OS</dt>
+                <dd>{{ selected_host_detail.host.os }}</dd>
+            </div>
+            {% endif %}
+            <div>
+                <dt>Network ID</dt>
+                <dd>{{ selected_host_detail.host.network_id }}</dd>
+            </div>
+        </dl>
+
+        {% if selected_host_detail.services %}
+        <div class="stack">
+            {% for service_info in selected_host_detail.services %}
+            <article class="service-card">
+                <div class="service-header">
+                    <strong>{{ service_info.service.port }}/{{ service_info.service.protocol }}</strong>
+                    <span>{{ service_info.service.service_name or "unknown" }}</span>
+                    {% if service_info.service.service_version %}
+                    <span class="mono">{{ service_info.service.service_version }}</span>
+                    {% endif %}
+                </div>
+                {% if service_info.service.extrainfo %}
+                <p class="panel-copy">{{ service_info.service.extrainfo }}</p>
+                {% endif %}
+                {% if service_info.proof_files %}
+                <div class="proof-grid">
+                    {% for file in service_info.proof_files %}
+                    <article class="proof-card">
+                        <div class="proof-meta">
+                            <strong>{{ file.proof_type }}</strong>
+                            <span>{{ file.name }}</span>
+                        </div>
+                        {% if file.type == "image" %}
+                        <img class="proof-thumb screenshot-clickable" src="{{ url_for('serve_file', filepath=file.path) }}" alt="{{ file.name }}">
+                        {% elif file.type in ["text", "jsonl"] %}
+                        <pre class="proof-text">{{ file.content }}</pre>
+                        {% else %}
+                        <a class="button quiet" href="{{ url_for('serve_file', filepath=file.path) }}" target="_blank">Open file</a>
+                        {% endif %}
+                    </article>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <p class="field-hint">No proof files for this service.</p>
+                {% endif %}
+            </article>
+            {% endfor %}
+        </div>
+        {% else %}
+        <p class="field-hint">No services on this host yet.</p>
+        {% endif %}
+        {% else %}
+        <h2 class="card-title">No host selected</h2>
+        <p class="panel-copy">Pick a host from the table to inspect its services and evidence.</p>
+        {% endif %}
+    </section>
+</section>
+{% endblock %}

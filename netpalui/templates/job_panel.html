@@ -1,0 +1,17 @@
+{% if job_id %}
+<section class="card job-panel" data-job-id="{{ job_id }}">
+    <div class="job-header">
+        <div>
+            <p class="kicker">Background Job</p>
+            <h3>Job {{ job_id }}</h3>
+        </div>
+        <div class="job-meta">
+            <span class="state-pill state-pending" data-job-state>pending</span>
+            <a href="#" class="button quiet" data-job-refresh hidden>Refresh page</a>
+        </div>
+    </div>
+    <pre class="log-box" data-job-logs>Waiting for background output...</pre>
+    <pre class="result-box" data-job-result hidden></pre>
+    <p class="flash flash-error" data-job-error hidden></p>
+</section>
+{% endif %}

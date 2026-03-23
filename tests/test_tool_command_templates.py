@@ -134,6 +134,34 @@ class ToolCommandTemplateTests(unittest.TestCase):
         self.assertEqual(runs[0]["_credential"]["type"], "domain")
         self.assertIn("_credential_key", runs[0])
 
+    def test_build_tool_runs_includes_all_type_credentials_for_matching_tool(self):
+        tool = {
+            "tool_name": "SMB Auth Check",
+            "tool_type": "command_custom",
+            "command": 'crackmapexec smb {ip} -u "{username}" -p "{password}"',
+            "cred_type": "domain",
+        }
+        credentials = [
+            {
+                "username": "shared-admin",
+                "password": "Passw0rd!",
+                "type": "all",
+                "use_in_auto_tools": True,
+            },
+            {
+                "username": "web-admin",
+                "password": "Summer2024!",
+                "type": "web",
+                "use_in_auto_tools": True,
+            },
+        ]
+
+        runs = ToolOrchestrator._build_tool_runs(tool, credentials)
+
+        self.assertEqual(len(runs), 1)
+        self.assertEqual(runs[0]["_credential"]["username"], "shared-admin")
+        self.assertEqual(runs[0]["_credential"]["type"], "all")
+
     def test_no_matching_credentials_logs_error_and_continues_to_next_tool(self):
         host = Host("10.10.10.161")
         service = Service(port=445, service_name="smb")

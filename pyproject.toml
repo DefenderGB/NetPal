@@ -28,7 +28,6 @@ dependencies = [
     "requests>=2.32.5",
     "playwright>=1.52.0",
     "textual>=2.1.0",
-    "textual-serve>=1.1.1",
     "boto3>=1.33.13",
     "ldap3>=2.9.1",
     "pycryptodome>=3.20.0",

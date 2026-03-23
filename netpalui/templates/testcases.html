@@ -1,0 +1,172 @@
+{% extends "base.html" %}
+{% block title %}Test Cases | NetPal{% endblock %}
+{% block content %}
+<section class="page-header">
+    <div class="page-header-copy">
+        <p class="kicker">Test Cases</p>
+        <h1>Checklist Tracking</h1>
+        <p class="page-intro">Load a CSV into the project-local testcase registry, filter by category or status, and update execution notes.</p>
+    </div>
+</section>
+
+<section class="grid two-up">
+    <form class="card" action="{{ url_for('testcases_page') }}" method="post">
+        <input type="hidden" name="action_name" value="load_csv">
+        <p class="kicker">Load</p>
+        <h2 class="card-title">Import CSV</h2>
+        <label class="field">
+            <span>CSV Path</span>
+            <input class="input" type="text" name="csv_path" data-path-suggest="true" data-suggest-target="tc-csv-suggestions" placeholder="/tmp/testcases.csv">
+            <div id="tc-csv-suggestions" class="suggestion-list"></div>
+        </label>
+        <div class="button-row">
+            <button class="button" type="submit">Load Test Cases</button>
+        </div>
+    </form>
+
+    <section class="card">
+        <p class="kicker">Summary</p>
+        <h2 class="card-title">Registry Counts</h2>
+        <div class="metric-grid compact-metrics">
+            <article class="metric-tile">
+                <span>Total</span>
+                <strong>{{ summary.total or 0 }}</strong>
+            </article>
+            <article class="metric-tile">
+                <span>Passed</span>
+                <strong>{{ summary.passed or 0 }}</strong>
+            </article>
+            <article class="metric-tile">
+                <span>Failed</span>
+                <strong>{{ summary.failed or 0 }}</strong>
+            </article>
+            <article class="metric-tile">
+                <span>Needs Input</span>
+                <strong>{{ summary.needs_input or 0 }}</strong>
+            </article>
+        </div>
+    </section>
+</section>
+
+<section class="card">
+    <p class="kicker">Filter</p>
+    <form class="filter-row" action="{{ url_for('testcases_page') }}" method="get">
+        <label class="field">
+            <span>Category</span>
+            <select class="select" name="category">
+                <option value="">All categories</option>
+                {% for category in categories %}
+                <option value="{{ category }}" {% if category == category_filter %}selected{% endif %}>{{ category }}</option>
+                {% endfor %}
+            </select>
+        </label>
+        <label class="field">
+            <span>Status</span>
+            <select class="select" name="status">
+                <option value="">All statuses</option>
+                {% for status in ["passed", "failed", "needs_input"] %}
+                <option value="{{ status }}" {% if status == status_filter %}selected{% endif %}>{{ status }}</option>
+                {% endfor %}
+            </select>
+        </label>
+        {% if selected_entry %}
+        <input type="hidden" name="test_case_id" value="{{ selected_entry.test_case_id }}">
+        {% endif %}
+        <div class="button-row align-end">
+            <button class="button secondary" type="submit">Apply Filters</button>
+        </div>
+    </form>
+</section>
+
+<section class="grid two-up">
+    <section class="card">
+        <p class="kicker">Cases</p>
+        <h2 class="card-title">Registry Entries</h2>
+        {% if entries %}
+        <div class="table-wrap">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Name</th>
+                        <th>Category</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for entry in entries %}
+                    <tr>
+                        <td><a href="{{ url_for('testcases_page', test_case_id=entry.test_case_id, category=category_filter, status=status_filter) }}">{{ entry.test_case_id }}</a></td>
+                        <td>{{ entry.test_name }}</td>
+                        <td>{{ entry.category }}</td>
+                        <td><span class="tag status-{{ entry.status }}">{{ entry.status }}</span></td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <p class="field-hint">No test cases loaded yet.</p>
+        {% endif %}
+    </section>
+
+    <section class="card">
+        <p class="kicker">Detail</p>
+        {% if selected_entry %}
+        <h2 class="card-title">{{ selected_entry.test_case_id }}</h2>
+        <dl class="key-values">
+            <div>
+                <dt>Name</dt>
+                <dd>{{ selected_entry.test_name }}</dd>
+            </div>
+            {% if selected_entry.category %}
+            <div>
+                <dt>Category</dt>
+                <dd>{{ selected_entry.category }}</dd>
+            </div>
+            {% endif %}
+            {% if selected_entry.phase %}
+            <div>
+                <dt>Phase</dt>
+                <dd>{{ selected_entry.phase }}</dd>
+            </div>
+            {% endif %}
+            <div>
+                <dt>Status</dt>
+                <dd>{{ selected_entry.status }}</dd>
+            </div>
+        </dl>
+        {% if selected_entry.description %}
+        <div class="detail-block">
+            <h4>Description</h4>
+            <p>{{ selected_entry.description }}</p>
+        </div>
+        {% endif %}
+        <form class="form-grid" action="{{ url_for('testcases_page') }}" method="post">
+            <input type="hidden" name="action_name" value="set_result">
+            <input type="hidden" name="test_case_id" value="{{ selected_entry.test_case_id }}">
+            <input type="hidden" name="category" value="{{ category_filter }}">
+            <input type="hidden" name="status" value="{{ status_filter }}">
+            <label class="field">
+                <span>Status</span>
+                <select class="select" name="status_value">
+                    {% for status in ["passed", "failed", "needs_input"] %}
+                    <option value="{{ status }}" {% if selected_entry.status == status %}selected{% endif %}>{{ status }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <label class="field full-span">
+                <span>Notes</span>
+                <textarea class="textarea" name="notes" rows="6">{{ selected_entry.notes }}</textarea>
+            </label>
+            <div class="button-row full-span">
+                <button class="button" type="submit">Save Result</button>
+            </div>
+        </form>
+        {% else %}
+        <h2 class="card-title">No testcase selected</h2>
+        <p class="panel-copy">Pick a testcase entry to review and update it.</p>
+        {% endif %}
+    </section>
+</section>
+{% endblock %}

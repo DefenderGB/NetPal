@@ -21,16 +21,17 @@ class NetworkContext:
 
 def detect_network_context(interface: str = "") -> NetworkContext:
     """Auto-detect the current network context."""
-    gw_mac = _get_gateway_mac(interface)
-    if gw_mac:
+    gateway_ip = _get_default_gateway_ip(interface)
+    if gateway_ip:
+        gateway_ip = gateway_ip.strip().lower()
         ssid = _get_wifi_ssid(interface)
-        label = f"Gateway {gw_mac}"
+        label = f"Gateway {gateway_ip}"
         if ssid:
-            label = f"{ssid} ({gw_mac})"
+            label = f"{ssid} ({gateway_ip})"
         return NetworkContext(
-            network_id=f"gwmac:{gw_mac}",
+            network_id=f"gateway:{gateway_ip}",
             label=label,
-            details={"gateway_mac": gw_mac, "ssid": ssid or "", "interface": interface},
+            details={"gateway_ip": gateway_ip, "ssid": ssid or "", "interface": interface},
         )
 
     bssid = _get_wifi_bssid(interface)
@@ -59,8 +60,11 @@ def _get_default_gateway_ip(interface: str = "") -> Optional[str]:
     system = platform.system()
     try:
         if system == "Darwin":
+            cmd = ["route", "-n", "get", "default"]
+            if interface:
+                cmd.extend(["-ifscope", interface])
             result = subprocess.run(
-                ["route", "-n", "get", "default"],
+                cmd,
                 capture_output=True,
                 text=True,
                 timeout=5,
@@ -79,40 +83,6 @@ def _get_default_gateway_ip(interface: str = "") -> Optional[str]:
                 match = re.search(r"default via (\S+)", result.stdout)
                 if match:
                     return match.group(1)
-    except Exception:
-        return None
-    return None
-
-
-def _get_gateway_mac(interface: str = "") -> Optional[str]:
-    gateway_ip = _get_default_gateway_ip(interface)
-    if not gateway_ip:
-        return None
-
-    system = platform.system()
-    try:
-        if system == "Darwin":
-            result = subprocess.run(
-                ["arp", "-n", gateway_ip],
-                capture_output=True,
-                text=True,
-                timeout=5,
-            )
-            if result.returncode == 0:
-                match = re.search(r"at\s+([0-9a-fA-F:]{11,17})", result.stdout)
-                if match:
-                    return match.group(1).lower()
-        elif system == "Linux":
-            result = subprocess.run(
-                ["ip", "neigh", "show", gateway_ip],
-                capture_output=True,
-                text=True,
-                timeout=5,
-            )
-            if result.returncode == 0:
-                match = re.search(r"lladdr\s+([0-9a-fA-F:]{11,17})", result.stdout)
-                if match:
-                    return match.group(1).lower()
     except Exception:
         return None
     return None

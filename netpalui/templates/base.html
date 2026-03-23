@@ -3,137 +3,578 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% block title %}NetPalUI{% endblock %}</title>
+    <title>{% block title %}NetPal Web UI{% endblock %}</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
-    <header>
-        <div class="header-left">
-            <a href="{{ url_for('index') }}" class="logo">🛡️ NetPalUI</a>
-            {% block breadcrumb %}{% endblock %}
-        </div>
-        <div class="header-right">
-            {% if scan_path %}
-            <span class="scan-path-label" title="{{ scan_path }}">📁 {{ scan_path | truncate(40) }}</span>
-            {% endif %}
-            <a href="{{ request.url }}" class="btn btn-sm btn-outline">🔄 Refresh</a>
-        </div>
-    </header>
-    <main>
-        {% block content %}{% endblock %}
-    </main>
+    <div class="site-shell">
+        <header class="topbar">
+            <div class="topbar-main">
+                <div class="brand-block">
+                    <a href="{{ url_for('projects_page') }}" class="brand">NetPal</a>
+                    <p class="brand-copy">Operator console for local projects, recon, findings, credentials, and evidence.</p>
+                </div>
+                {% if active_project %}
+                <div class="topbar-signal">
+                    <div class="signal-title">
+                        <span class="project-pill-label">Active Project</span>
+                        <strong>{{ active_project.name }}</strong>
+                        <span class="mono">{{ active_project.project_id }}</span>
+                    </div>
+                    <div class="signal-metrics">
+                        <span><strong>{{ active_metrics.assets }}</strong> Assets</span>
+                        <span><strong>{{ active_metrics.hosts }}</strong> Hosts</span>
+                        <span><strong>{{ active_metrics.services }}</strong> Services</span>
+                        <span><strong>{{ active_metrics.findings }}</strong> Findings</span>
+                    </div>
+                </div>
+                {% else %}
+                <div class="topbar-signal is-empty">
+                    <span class="project-pill-label">Active Project</span>
+                    <strong>No active project selected</strong>
+                </div>
+                {% endif %}
+            </div>
+            <div class="topbar-actions">
+                {% if active_project %}
+                <a href="{{ url_for('project_overview', project_id=active_project.project_id) }}" class="ghost-link">Overview</a>
+                <button type="button" class="ghost-link ghost-button" data-modal-open="edit-active-project-modal">Edit Project</button>
+                {% endif %}
+                <a href="{{ request.url }}" class="ghost-link">Refresh</a>
+            </div>
+        </header>
 
-    {# --- Lightbox image viewer --- #}
+        <nav class="nav-strip" aria-label="Primary">
+            {% for item in nav_items %}
+                {% if item.enabled %}
+                <a href="{{ item.url }}" class="nav-link{% if item.active %} is-active{% endif %}">{{ item.label }}</a>
+                {% else %}
+                <span class="nav-link is-disabled">{{ item.label }}</span>
+                {% endif %}
+            {% endfor %}
+        </nav>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+            <div class="flash-stack">
+                {% for category, message in messages %}
+                <div class="flash flash-{{ category }}">{{ message }}</div>
+                {% endfor %}
+            </div>
+            {% endif %}
+        {% endwith %}
+
+        <div class="page-shell">
+            <aside class="project-rail">
+                <div class="project-rail-head">
+                    <div>
+                        <p class="kicker">Projects</p>
+                        <h2 class="rail-title">Engagements</h2>
+                    </div>
+                    <button type="button" class="button project-rail-button" data-modal-open="create-project-modal">Create Project</button>
+                </div>
+
+                <div class="project-nav-list">
+                    {% if sidebar_projects %}
+                        {% for item in sidebar_projects %}
+                        <article class="project-nav-item{% if item.id == current_project_id %} is-current{% endif %}{% if active_project and active_project.project_id == item.id %} is-active{% endif %}">
+                            <a href="{{ url_for('projects_page', selected=item.id) }}" class="project-nav-main">
+                                <div class="project-nav-top">
+                                    <strong class="project-nav-title">{{ item.name }}</strong>
+                                    {% if active_project and active_project.project_id == item.id %}
+                                    <span class="active-dot">Active</span>
+                                    {% endif %}
+                                </div>
+                                <span class="mono project-nav-id">{{ item.id }}</span>
+                                {% if item.description %}
+                                <span class="project-nav-copy">{{ item.description }}</span>
+                                {% endif %}
+                                <span class="project-nav-updated">Updated {{ item.updated_str }}</span>
+                            </a>
+                            <div class="project-nav-actions">
+                                <a href="{{ url_for('project_overview', project_id=item.id) }}" class="micro-link">Overview</a>
+                                {% if active_project and active_project.project_id == item.id %}
+                                <button type="button" class="micro-button" data-modal-open="edit-active-project-modal">Edit</button>
+                                {% endif %}
+                                {% if not active_project or active_project.project_id != item.id %}
+                                <form class="inline-form" action="{{ url_for('project_activate') }}" method="post">
+                                    <input type="hidden" name="identifier" value="{{ item.id }}">
+                                    <button type="submit" class="micro-button">Use</button>
+                                </form>
+                                {% endif %}
+                            </div>
+                        </article>
+                        {% endfor %}
+                    {% else %}
+                    <div class="empty-rail">
+                        <p>No projects yet.</p>
+                        <button type="button" class="button secondary" data-modal-open="create-project-modal">Start your first project</button>
+                    </div>
+                    {% endif %}
+                </div>
+            </aside>
+
+            <main class="content-area">
+                {% block content %}{% endblock %}
+            </main>
+        </div>
+    </div>
+
+    <div id="create-project-modal" class="modal-shell" hidden>
+        <div class="modal-backdrop" data-modal-close="create-project-modal"></div>
+        <div class="modal-card medium">
+            <div class="modal-header">
+                <div>
+                    <p class="kicker">Create</p>
+                    <h2 class="card-title">New Project</h2>
+                    <p class="panel-copy">Create the project and optionally seed it with an initial asset.</p>
+                </div>
+                <button type="button" class="modal-close" data-modal-close="create-project-modal">&times;</button>
+            </div>
+            <form action="{{ url_for('project_create') }}" method="post" data-asset-form="starter">
+                <div class="form-grid">
+                    <label class="field">
+                        <span>Project Name</span>
+                        <input class="input" type="text" name="name" required>
+                    </label>
+                    <label class="field">
+                        <span>External ID</span>
+                        <input class="input" type="text" name="external_id" placeholder="ASANA-123">
+                    </label>
+                    <label class="field full-span">
+                        <span>Description</span>
+                        <textarea class="textarea" name="description" rows="3"></textarea>
+                    </label>
+                    <label class="field">
+                        <span>AD Domain</span>
+                        <input class="input" type="text" name="ad_domain" placeholder="corp.local">
+                    </label>
+                    <label class="field">
+                        <span>DC IP / Hostname</span>
+                        <input class="input" type="text" name="ad_dc_ip" placeholder="10.0.0.1">
+                    </label>
+                    <label class="field">
+                        <span>Starter Asset Type</span>
+                        <select class="select" name="asset_type" data-asset-type>
+                            <option value="">None</option>
+                            <option value="network">Network</option>
+                            <option value="single">Single Host</option>
+                            <option value="list">List</option>
+                        </select>
+                    </label>
+                    <label class="field" data-asset-target-group>
+                        <span>Starter Asset Target</span>
+                        <input class="input" type="text" name="asset_target" data-asset-target-input placeholder="Select an asset type first">
+                    </label>
+                </div>
+                <div class="button-row">
+                    <button class="button" type="submit">Create Project</button>
+                    <button class="button quiet" type="button" data-modal-close="create-project-modal">Cancel</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    {% if active_project %}
+    <div id="edit-active-project-modal" class="modal-shell" hidden>
+        <div class="modal-backdrop" data-modal-close="edit-active-project-modal"></div>
+        <div class="modal-card medium">
+            <div class="modal-header">
+                <div>
+                    <p class="kicker">Edit</p>
+                    <h2 class="card-title">Active Project</h2>
+                    <p class="panel-copy">Update the active engagement metadata without leaving the current page.</p>
+                </div>
+                <button type="button" class="modal-close" data-modal-close="edit-active-project-modal">&times;</button>
+            </div>
+            <form action="{{ url_for('project_edit', project_id=active_project.project_id) }}" method="post">
+                <div class="form-grid">
+                    <label class="field">
+                        <span>Project Name</span>
+                        <input class="input" type="text" name="name" value="{{ active_project.name }}" required>
+                    </label>
+                    <label class="field">
+                        <span>External ID</span>
+                        <input class="input" type="text" name="external_id" value="{{ active_project.external_id }}">
+                    </label>
+                    <label class="field full-span">
+                        <span>Description</span>
+                        <textarea class="textarea" name="description" rows="4">{{ active_project.description }}</textarea>
+                    </label>
+                    <label class="field">
+                        <span>AD Domain</span>
+                        <input class="input" type="text" name="ad_domain" value="{{ active_project.ad_domain }}">
+                    </label>
+                    <label class="field">
+                        <span>DC IP / Hostname</span>
+                        <input class="input" type="text" name="ad_dc_ip" value="{{ active_project.ad_dc_ip }}">
+                    </label>
+                </div>
+                <div class="button-row">
+                    <button class="button" type="submit">Save Project</button>
+                    <button class="button quiet" type="button" data-modal-close="edit-active-project-modal">Cancel</button>
+                </div>
+            </form>
+        </div>
+    </div>
+    {% endif %}
+
     <div id="lightbox" class="lightbox">
-        <button id="lightbox-close" class="lightbox-close" title="Close">✕</button>
+        <button id="lightbox-close" class="lightbox-close" title="Close">x</button>
         <div id="lightbox-backdrop" class="lightbox-backdrop"></div>
         <div id="lightbox-scroll" class="lightbox-scroll">
             <img id="lightbox-img" src="" alt="Full size preview">
         </div>
     </div>
 
-    {# --- Floating back-to-top button --- #}
-    <button id="back-to-top" class="back-to-top" title="Take me to the top">⬆ Top</button>
+    <button id="back-to-top" class="back-to-top" title="Back to top">Top</button>
+
     <script>
-    (function() {
-        // Back to top
-        const btn = document.getElementById('back-to-top');
-        window.addEventListener('scroll', function() {
-            btn.classList.toggle('visible', window.scrollY > 300);
-        });
-        btn.addEventListener('click', function() {
-            window.scrollTo({ top: 0, behavior: 'smooth' });
+    (function () {
+        const body = document.body;
+        const backToTop = document.getElementById("back-to-top");
+        if (backToTop) {
+            window.addEventListener("scroll", function () {
+                backToTop.classList.toggle("visible", window.scrollY > 280);
+            });
+            backToTop.addEventListener("click", function () {
+                window.scrollTo({ top: 0, behavior: "smooth" });
+            });
+        }
+
+        function syncModalBodyState() {
+            const anyOpen = Array.from(document.querySelectorAll(".modal-shell")).some(function (item) {
+                return !item.hidden;
+            });
+            body.classList.toggle("modal-open", anyOpen);
+        }
+
+        function setModalOpen(modal, open) {
+            if (!modal) return;
+            modal.hidden = !open;
+            syncModalBodyState();
+            if (open) {
+                const firstInput = modal.querySelector("input, textarea, select, button");
+                if (firstInput) firstInput.focus();
+            }
+        }
+
+        document.querySelectorAll("[data-modal-open]").forEach(function (trigger) {
+            trigger.addEventListener("click", function (event) {
+                if (trigger.tagName === "A") {
+                    event.preventDefault();
+                }
+                const modalId = trigger.getAttribute("data-modal-open");
+                setModalOpen(document.getElementById(modalId), true);
+            });
         });
 
-        // Lightbox
-        const lightbox = document.getElementById('lightbox');
-        const lightboxImg = document.getElementById('lightbox-img');
-        const lightboxClose = document.getElementById('lightbox-close');
-        const lightboxBackdrop = document.getElementById('lightbox-backdrop');
-        const lightboxScroll = document.getElementById('lightbox-scroll');
+        document.querySelectorAll("[data-modal-close]").forEach(function (trigger) {
+            trigger.addEventListener("click", function () {
+                const modalId = trigger.getAttribute("data-modal-close");
+                const modal = document.getElementById(modalId);
+                setModalOpen(modal, false);
+                const closeUrl = trigger.getAttribute("data-modal-close-url") || (modal ? modal.dataset.modalCloseUrl : "");
+                if (closeUrl) {
+                    window.location.assign(closeUrl);
+                }
+            });
+        });
+
+        document.querySelectorAll(".modal-shell[data-modal-open-on-load='true']").forEach(function (modal) {
+            setModalOpen(modal, true);
+        });
+
+        const lightbox = document.getElementById("lightbox");
+        const lightboxImg = document.getElementById("lightbox-img");
+        const lightboxClose = document.getElementById("lightbox-close");
+        const lightboxBackdrop = document.getElementById("lightbox-backdrop");
+        const lightboxScroll = document.getElementById("lightbox-scroll");
+
+        function closeLightbox() {
+            if (!lightbox) return;
+            lightbox.classList.remove("active", "zoomed");
+            lightboxImg.src = "";
+            lightboxImg.style.width = "";
+        }
 
         function openLightbox(src) {
+            if (!lightbox || !src) return;
             lightboxImg.src = src;
-            lightboxImg.style.width = '';
-            lightbox.classList.add('active');
-            lightbox.classList.remove('zoomed');
-        }
-        function closeLightbox() {
-            lightbox.classList.remove('active', 'zoomed');
-            lightboxImg.style.width = '';
-            lightboxImg.src = '';
+            lightbox.classList.add("active");
+            lightbox.classList.remove("zoomed");
         }
 
-        // Open from screenshot click
-        document.addEventListener('click', function(e) {
-            if (e.target.classList.contains('screenshot-clickable')) {
-                e.preventDefault();
-                openLightbox(e.target.src);
+        document.addEventListener("click", function (event) {
+            const target = event.target;
+            if (!(target instanceof HTMLElement)) return;
+            if (target.classList.contains("screenshot-clickable")) {
+                event.preventDefault();
+                openLightbox(target.getAttribute("src") || target.getAttribute("data-full-src") || "");
             }
         });
 
-        // Close via X button
-        lightboxClose.addEventListener('click', function(e) {
-            e.stopPropagation();
-            closeLightbox();
-        });
+        if (lightboxClose) lightboxClose.addEventListener("click", closeLightbox);
+        if (lightboxBackdrop) lightboxBackdrop.addEventListener("click", closeLightbox);
+        if (lightboxScroll) {
+            lightboxScroll.addEventListener("click", function (event) {
+                if (event.target === lightboxScroll) closeLightbox();
+            });
+        }
+        if (lightboxImg) {
+            lightboxImg.addEventListener("click", function (event) {
+                event.stopPropagation();
+                const zoomed = lightbox.classList.toggle("zoomed");
+                if (zoomed) {
+                    const naturalWidth = lightboxImg.naturalWidth || window.innerWidth;
+                    lightboxImg.style.width = Math.max(naturalWidth, window.innerWidth * 1.4) + "px";
+                } else {
+                    lightboxImg.style.width = "";
+                    lightboxScroll.scrollTop = 0;
+                    lightboxScroll.scrollLeft = 0;
+                }
+            });
+        }
 
-        // Close via backdrop click
-        lightboxBackdrop.addEventListener('click', closeLightbox);
-
-        // Toggle zoom on image click
-        lightboxImg.addEventListener('click', function(e) {
-            e.stopPropagation();
-            const isZoomed = lightbox.classList.toggle('zoomed');
-            if (isZoomed) {
-                // Stretch to at least 180% of viewport or natural size, whichever is larger
-                const natW = lightboxImg.naturalWidth;
-                const zoomW = Math.max(natW, window.innerWidth * 1.8);
-                lightboxImg.style.width = zoomW + 'px';
-            } else {
-                lightboxImg.style.width = '';
-                lightboxScroll.scrollTop = 0;
-                lightboxScroll.scrollLeft = 0;
+        document.addEventListener("keydown", function (event) {
+            if (event.key === "Escape") {
+                closeLightbox();
+                document.querySelectorAll(".modal-shell").forEach(function (modal) {
+                    setModalOpen(modal, false);
+                });
             }
         });
 
-        // Close on scroll area click (but not on image)
-        lightboxScroll.addEventListener('click', function(e) {
-            if (e.target === lightboxScroll) closeLightbox();
-        });
+        function setupJobPanels() {
+            document.querySelectorAll(".job-panel[data-job-id]").forEach(function (panel) {
+                const jobId = panel.dataset.jobId;
+                if (!jobId || panel.dataset.bound === "1") return;
+                panel.dataset.bound = "1";
 
-        // Escape key
-        document.addEventListener('keydown', function(e) {
-            if (e.key === 'Escape') closeLightbox();
-        });
+                const state = panel.querySelector("[data-job-state]");
+                const logs = panel.querySelector("[data-job-logs]");
+                const result = panel.querySelector("[data-job-result]");
+                const error = panel.querySelector("[data-job-error]");
+                const refresh = panel.querySelector("[data-job-refresh]");
 
-        // Detect cropped screenshots (image taller than the 300px container)
-        function checkCroppedImages() {
-            document.querySelectorAll('.screenshot-img-wrap').forEach(function(wrap) {
-                const img = wrap.querySelector('img');
-                if (!img) return;
-                function check() {
-                    if (img.naturalHeight > 0) {
-                        // Compare rendered height at full width vs max-height
-                        const ratio = img.naturalHeight / img.naturalWidth;
-                        const renderedH = wrap.offsetWidth * ratio;
-                        if (renderedH > 280) {
-                            wrap.closest('.screenshot-card').classList.add('is-cropped');
-                        }
+                function render(snapshot) {
+                    if (!snapshot) return;
+                    if (state) {
+                        state.textContent = snapshot.state;
+                        state.className = "state-pill state-" + snapshot.state;
+                    }
+                    if (logs) {
+                        logs.textContent = snapshot.logs && snapshot.logs.length ? snapshot.logs.join("\n") : "Waiting for background output...";
+                        logs.scrollTop = logs.scrollHeight;
+                    }
+                    if (snapshot.result && result) {
+                        result.hidden = false;
+                        result.textContent = JSON.stringify(snapshot.result, null, 2);
+                    }
+                    if (snapshot.error && error) {
+                        error.hidden = false;
+                        error.textContent = snapshot.error;
+                    }
+                    if ((snapshot.state === "completed" || snapshot.state === "failed") && refresh && snapshot.refresh_url) {
+                        refresh.hidden = false;
+                        refresh.href = snapshot.refresh_url;
                     }
                 }
-                if (img.complete) check();
-                else img.addEventListener('load', check);
+
+                function poll() {
+                    fetch("/jobs/" + jobId + "/status", { headers: { "Accept": "application/json" } })
+                        .then(function (response) {
+                            if (!response.ok) throw new Error("Unable to read job status");
+                            return response.json();
+                        })
+                        .then(function (snapshot) {
+                            render(snapshot);
+                            if (snapshot.state === "completed" || snapshot.state === "failed") return;
+                            window.setTimeout(poll, 1200);
+                        })
+                        .catch(function (err) {
+                            if (error) {
+                                error.hidden = false;
+                                error.textContent = err.message;
+                            }
+                        });
+                }
+
+                poll();
             });
         }
-        checkCroppedImages();
-        // Re-check when collapsible boxes open (images may load lazily)
-        document.querySelectorAll('.collapsible-header').forEach(function(hdr) {
-            hdr.addEventListener('click', function() {
-                setTimeout(checkCroppedImages, 100);
+
+        function setupPathSuggestions() {
+            const debounceTimers = new WeakMap();
+
+            document.querySelectorAll("input[data-path-suggest='true']").forEach(function (input) {
+                const targetId = input.dataset.suggestTarget;
+                const list = targetId ? document.getElementById(targetId) : null;
+                if (!list) return;
+
+                function clear() {
+                    list.innerHTML = "";
+                }
+
+                function populate(items) {
+                    clear();
+                    items.forEach(function (item) {
+                        const option = document.createElement("button");
+                        option.type = "button";
+                        option.className = "suggestion-item";
+                        option.textContent = item;
+                        option.addEventListener("click", function () {
+                            input.value = item;
+                            clear();
+                            input.focus();
+                        });
+                        list.appendChild(option);
+                    });
+                }
+
+                input.addEventListener("input", function () {
+                    const value = input.value.trim();
+                    clearTimeout(debounceTimers.get(input));
+                    if (!value) {
+                        clear();
+                        return;
+                    }
+                    const timer = window.setTimeout(function () {
+                        fetch("/api/suggest-path?q=" + encodeURIComponent(value), { headers: { "Accept": "application/json" } })
+                            .then(function (response) { return response.json(); })
+                            .then(function (items) { populate(Array.isArray(items) ? items : []); })
+                            .catch(clear);
+                    }, 140);
+                    debounceTimers.set(input, timer);
+                });
+
+                input.addEventListener("blur", function () {
+                    window.setTimeout(clear, 180);
+                });
             });
-        });
+        }
+
+        function setupAssetForms() {
+            document.querySelectorAll("[data-asset-form]").forEach(function (form) {
+                const typeSelect = form.querySelector("[data-asset-type]");
+                if (!typeSelect) return;
+                const standardGroup = form.querySelector("[data-asset-target-group]");
+                const listTargetsGroup = form.querySelector("[data-list-targets-group]");
+                const listFileGroup = form.querySelector("[data-list-file-group]");
+                const targetInput = form.querySelector("[data-asset-target-input]");
+
+                function sync() {
+                    const type = typeSelect.value;
+                    const isList = type === "list";
+                    if (standardGroup && listTargetsGroup && listFileGroup) {
+                        standardGroup.hidden = isList;
+                        listTargetsGroup.hidden = !isList;
+                        listFileGroup.hidden = !isList;
+                    }
+                    if (!targetInput) return;
+                    if (!type) targetInput.placeholder = "Select an asset type first";
+                    else if (type === "network") targetInput.placeholder = "10.0.0.0/24";
+                    else if (type === "single") targetInput.placeholder = "app.example.com or 10.0.0.10";
+                    else if (type === "list") targetInput.placeholder = "10.0.0.10,10.0.0.11 or /tmp/targets.txt";
+                    else targetInput.placeholder = "Target";
+                }
+
+                typeSelect.addEventListener("change", sync);
+                sync();
+            });
+        }
+
+        function setupReconForm() {
+            const scanType = document.getElementById("recon-scan-type");
+            const customGroup = document.getElementById("recon-custom-group");
+            if (!scanType || !customGroup) return;
+            function sync() {
+                customGroup.hidden = scanType.value !== "custom";
+            }
+            scanType.addEventListener("change", sync);
+            sync();
+        }
+
+        function setupFindingForm() {
+            const hostSelect = document.getElementById("finding-host-select");
+            const portSelect = document.getElementById("finding-port-select");
+            const proofWrap = document.getElementById("finding-proof-files");
+            const payloadScript = document.getElementById("finding-form-data");
+            if (!hostSelect || !portSelect || !proofWrap || !payloadScript) return;
+
+            let payload = { hosts: [] };
+            try {
+                payload = JSON.parse(payloadScript.textContent || "{}");
+            } catch (err) {
+                payload = { hosts: [] };
+            }
+
+            function sync() {
+                const selected = payload.hosts.find(function (item) {
+                    return String(item.id) === String(hostSelect.value);
+                });
+
+                portSelect.innerHTML = "";
+                proofWrap.innerHTML = "";
+
+                if (!selected) {
+                    const empty = document.createElement("option");
+                    empty.value = "";
+                    empty.textContent = "Select a host first";
+                    portSelect.appendChild(empty);
+                    return;
+                }
+
+                if (selected.ports.length === 0) {
+                    const empty = document.createElement("option");
+                    empty.value = "0";
+                    empty.textContent = "No service ports found";
+                    portSelect.appendChild(empty);
+                } else {
+                    selected.ports.forEach(function (port) {
+                        const option = document.createElement("option");
+                        option.value = String(port.value);
+                        option.textContent = port.label;
+                        portSelect.appendChild(option);
+                    });
+                }
+
+                if (!selected.proofs.length) {
+                    proofWrap.innerHTML = "<p class='field-hint'>No saved proof files for this host yet.</p>";
+                    return;
+                }
+
+                selected.proofs.forEach(function (proof, index) {
+                    const label = document.createElement("label");
+                    label.className = "checkbox-row";
+
+                    const checkbox = document.createElement("input");
+                    checkbox.type = "checkbox";
+                    checkbox.name = "proof_files";
+                    checkbox.value = proof.path;
+                    checkbox.id = "proof-file-" + index;
+
+                    const text = document.createElement("span");
+                    text.textContent = proof.label;
+
+                    label.appendChild(checkbox);
+                    label.appendChild(text);
+                    proofWrap.appendChild(label);
+                });
+            }
+
+            hostSelect.addEventListener("change", sync);
+            sync();
+        }
+
+        setupJobPanels();
+        setupPathSuggestions();
+        setupAssetForms();
+        setupReconForm();
+        setupFindingForm();
     })();
     </script>
+
+    {% block scripts %}{% endblock %}
 </body>
 </html>

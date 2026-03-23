@@ -103,7 +103,7 @@ Examples:
   netpal recon-tools -t all_discovered --project "Other Project"
   netpal recon-tools -t all_discovered --http-recon  # only run Playwright on HTTP/HTTPS services
   netpal recon-tools --host 10.0.0.5 --port 80 --tool 'FTP Anonymous Login'
-  netpal recon-tools --host 10.0.0.5 --network-id gwmac:aa:bb:cc:dd:ee:ff --port 80 --tool 'FTP Anonymous Login'
+  netpal recon-tools --host 10.0.0.5 --network-id gateway:10.0.0.1 --port 80 --tool 'FTP Anonymous Login'
   netpal recon-tools --host 10.0.0.253 --port 80 --tool 'Unauthenticated Bosch R2 Dashboard Access'
 
 Lists targets with host and service counts, or runs exploit tools
@@ -429,22 +429,30 @@ findings JSON, and all evidence files from scan_results/.
     delete_parser.add_argument('name', nargs='?', default=None,
                                help='Project name, ID, or external ID to delete (omit to list projects)')
 
-    # ── interactive ───────────────────────────────────────────────────
+    # ── interactive / tui ────────────────────────────────────────────
+    interactive_description = (
+        'Open a full-screen terminal UI providing a guided, '
+        'multi-screen workflow for the entire NetPal pipeline.'
+    )
     subparsers.add_parser(
         'interactive',
         parents=[_verbose_parent],
         help='Launch the Textual-based interactive TUI',
-        description='Open a full-screen terminal UI providing a guided, '
-                    'multi-screen workflow for the entire NetPal pipeline.',
+        description=interactive_description,
+    )
+    subparsers.add_parser(
+        'tui',
+        parents=[_verbose_parent],
+        help='Launch the Textual-based interactive TUI (alias)',
+        description=interactive_description,
     )
 
     # ── website ──────────────────────────────────────────────────────
     subparsers.add_parser(
         'website',
         parents=[_verbose_parent],
-        help='Serve the Textual TUI as a web application',
-        description='Launch a web server that serves the NetPal TUI '
-                    'in a browser via textual-serve on port 7123.',
+        help='Launch the Flask web operator UI',
+        description='Launch the NetPal Flask operator UI on port 5001.',
     )
 
     # ── auto ─────────────────────────────────────────────────────────
@@ -639,6 +647,8 @@ def display_dashboard(config, project):
     print(f"    netpal ai-report-enhance AI enhancement of findings")
     print(f"    netpal findings          View security findings")
     print(f"    netpal setup             Configuration wizard")
+    print(f"    netpal interactive       Launch terminal TUI")
+    print(f"    netpal tui               Launch terminal TUI (alias)")
     print(f"    netpal auto              Fully automated scan pipeline")
     print(f"    netpal recon-tools       List targets or run exploit tools")
     print(f"    netpal ad-scan           Run AD LDAP scan")
@@ -700,18 +710,18 @@ def main():
         return _run_dashboard(args)
 
     # Handle interactive TUI (minimal bootstrap)
-    if args.command == 'interactive':
+    if args.command in ('interactive', 'tui'):
         from .tui import run_interactive
         return run_interactive()
 
-    # Handle website (serve TUI in browser)
+    # Handle website (serve Flask UI in browser)
     if args.command == 'website':
         from .utils.tool_paths import check_tools
 
         if not check_tools():
             return 1
 
-        from textual_serve.server import Server
+        from netpalui.app import run_server
         from .utils.validation import get_interfaces_with_ips
 
         interfaces = get_interfaces_with_ips()
@@ -739,18 +749,12 @@ def main():
                 print(f"{Fore.RED}  Invalid input. Enter a number.{Style.RESET_ALL}")
 
         selected_name, selected_ip = interfaces_with_ip[choice_idx]
-        public_url = f"http://{selected_ip}:7123"
-        print(f"\n{Fore.GREEN}[INFO] Serving on {selected_name} ({selected_ip})")
-        print(f"[INFO] Public URL: {public_url}{Style.RESET_ALL}\n")
+        public_url = f"http://{selected_ip}:5001"
+        print(f"\n{Fore.GREEN}[INFO] Serving Flask UI on {selected_name} ({selected_ip})")
+        print(f"[INFO] Public URL: {public_url}")
+        print(f"[INFO] Local URL: http://127.0.0.1:5001{Style.RESET_ALL}\n")
 
-        server = Server(
-            f"{sys.executable} -m netpal.tui",
-            port=7123,
-            host="0.0.0.0",
-            public_url=public_url,
-            title="NetPal TUI"
-        )
-        server.serve()
+        run_server(host="0.0.0.0", port=5001, debug=False)
         return 0
     
     # Handle setup (minimal bootstrap)

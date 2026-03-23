@@ -713,6 +713,18 @@ class LocalOnlyParityTests(unittest.TestCase):
 
         mock_check_tools.assert_called_once_with()
 
+    def test_cli_tui_alias_routes_to_run_interactive(self):
+        from netpal import cli
+
+        with (
+            mock.patch.object(sys, "argv", ["netpal", "tui"]),
+            mock.patch("netpal.utils.logger.setup_logging"),
+            mock.patch("netpal.tui.run_interactive", return_value=0) as mock_run_interactive,
+        ):
+            self.assertEqual(cli.main(), 0)
+
+        mock_run_interactive.assert_called_once_with()
+
     def test_recon_tools_validate_prerequisites_checks_required_tools(self):
         args = SimpleNamespace(
             target=None,
@@ -755,7 +767,7 @@ class LocalOnlyParityTests(unittest.TestCase):
         asset = SimpleNamespace(type="network", network="10.0.0.0/24", name="DMZ")
         project = Project(name="Discover", project_id="NETP-TEST-DISCOVER")
         config = {"network_interface": "", "notification_enabled": False}
-        network_context = SimpleNamespace(network_id="gwmac:test", label="Lab")
+        network_context = SimpleNamespace(network_id="gateway:10.0.0.1", label="Lab")
 
         with mock.patch("netpal.utils.scanning.scan_helpers.send_scan_notification"):
             hosts = run_discovery_phase(

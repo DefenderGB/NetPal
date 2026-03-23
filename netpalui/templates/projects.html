@@ -1,0 +1,293 @@
+{% extends "base.html" %}
+{% block title %}Projects | NetPal{% endblock %}
+{% block content %}
+{% if selected_project %}
+<section class="hero-band">
+    <div class="hero-copy">
+        <p class="kicker">Project Home</p>
+        <h1>{{ selected_project.name }}</h1>
+        <p class="hero-copy-text">
+            {{ selected_project.description or "Use this page as the command deck for project metadata, scope, quick health checks, and fast pivots into the operational views." }}
+        </p>
+        <div class="tag-list">
+            <span class="tag mono">{{ selected_project.project_id }}</span>
+            {% if selected_project.external_id %}<span class="tag">{{ selected_project.external_id }}</span>{% endif %}
+            {% if active_project and active_project.project_id == selected_project.project_id %}
+            <span class="tag tag-accent">Active Engagement</span>
+            {% endif %}
+            {% if selected_project.ad_domain %}<span class="tag">{{ selected_project.ad_domain }}</span>{% endif %}
+            {% if selected_project.ad_dc_ip %}<span class="tag mono">{{ selected_project.ad_dc_ip }}</span>{% endif %}
+        </div>
+    </div>
+    <div class="hero-actions">
+        <button type="button" class="button" data-modal-open="edit-selected-project-modal">Edit Project</button>
+        {% if not active_project or active_project.project_id != selected_project.project_id %}
+        <form class="inline-form" action="{{ url_for('project_activate') }}" method="post">
+            <input type="hidden" name="identifier" value="{{ selected_project.project_id }}">
+            <button class="button" type="submit">Set Active</button>
+        </form>
+        {% endif %}
+        <a class="button secondary" href="{{ url_for('project_overview', project_id=selected_project.project_id) }}">Open Project Overview</a>
+        <a class="button quiet" href="{{ url_for('hosts_page') }}">Open Hosts</a>
+    </div>
+    <div class="hero-metrics">
+        <article class="hero-metric">
+            <span>Assets</span>
+            <strong>{{ selected_project_metrics.assets }}</strong>
+        </article>
+        <article class="hero-metric">
+            <span>Hosts</span>
+            <strong>{{ selected_project_metrics.hosts }}</strong>
+        </article>
+        <article class="hero-metric">
+            <span>Services</span>
+            <strong>{{ selected_project_metrics.services }}</strong>
+        </article>
+        <article class="hero-metric">
+            <span>Findings</span>
+            <strong>{{ selected_project_metrics.findings }}</strong>
+        </article>
+        <article class="hero-metric">
+            <span>Test Cases</span>
+            <strong>{{ selected_project_metrics.testcases }}</strong>
+        </article>
+    </div>
+</section>
+
+<section class="dashboard-grid">
+    <section class="card">
+        <div class="section-row">
+            <div>
+                <p class="kicker">Metadata</p>
+                <h2 class="card-title">Project Details</h2>
+                <p class="panel-copy">Keep the engagement metadata aligned across the dashboard, reports, and follow-on workflows.</p>
+            </div>
+            <form class="inline-form" action="{{ url_for('project_delete', project_id=selected_project.project_id) }}" method="post" onsubmit="return confirm('Delete this project and all local data?');">
+                <button class="button danger" type="submit">Delete Project</button>
+            </form>
+        </div>
+        <dl class="key-values">
+            <div>
+                <dt>Project Name</dt>
+                <dd>{{ selected_project.name }}</dd>
+            </div>
+            <div>
+                <dt>Project ID</dt>
+                <dd class="mono">{{ selected_project.project_id }}</dd>
+            </div>
+            <div>
+                <dt>External ID</dt>
+                <dd>{{ selected_project.external_id or "-" }}</dd>
+            </div>
+            <div>
+                <dt>AD Domain</dt>
+                <dd>{{ selected_project.ad_domain or "-" }}</dd>
+            </div>
+            <div>
+                <dt>DC IP / Hostname</dt>
+                <dd>{{ selected_project.ad_dc_ip or "-" }}</dd>
+            </div>
+            <div>
+                <dt>Status</dt>
+                <dd>{% if active_project and active_project.project_id == selected_project.project_id %}Active engagement{% else %}Selected only{% endif %}</dd>
+            </div>
+        </dl>
+        <div class="detail-block">
+            <h4>Description</h4>
+            <p>{{ selected_project.description or "No project description saved yet." }}</p>
+        </div>
+    </section>
+
+    <section class="card">
+        <p class="kicker">Project Signals</p>
+        <h2 class="card-title">What Stands Out</h2>
+        {% if selected_highlights.severity_counts %}
+        <div class="signal-strip">
+            {% for severity, count in selected_highlights.severity_counts.items() %}
+            <span class="tag {{ severity_color(severity) }}">{{ severity }}: {{ count }}</span>
+            {% endfor %}
+        </div>
+        {% else %}
+        <p class="field-hint">No findings recorded yet.</p>
+        {% endif %}
+
+        <div class="signal-list">
+            <div class="signal-row">
+                <span>Most loaded host</span>
+                {% if selected_highlights.top_hosts %}
+                <strong>{{ selected_highlights.top_hosts[0].label }}</strong>
+                {% else %}
+                <strong>No hosts yet</strong>
+                {% endif %}
+            </div>
+            <div class="signal-row">
+                <span>Top asset</span>
+                {% if selected_highlights.asset_rows %}
+                <strong>{{ selected_highlights.asset_rows[0].asset.name }}</strong>
+                {% else %}
+                <strong>No assets yet</strong>
+                {% endif %}
+            </div>
+            <div class="signal-row">
+                <span>Active project status</span>
+                <strong>{% if active_project and active_project.project_id == selected_project.project_id %}Selected and active{% else %}Selected only{% endif %}</strong>
+            </div>
+        </div>
+
+        <div class="button-row">
+            <a class="button quiet" href="{{ url_for('assets_page') }}">Manage Assets</a>
+            <a class="button quiet" href="{{ url_for('findings_page') }}">Open Findings</a>
+            <a class="button quiet" href="{{ url_for('recon_page') }}">Run Recon</a>
+        </div>
+    </section>
+</section>
+
+<section class="stack-grid">
+    <section class="card">
+        <p class="kicker">Targets</p>
+        <h2 class="card-title">Asset Portfolio</h2>
+        {% if selected_highlights.asset_rows %}
+        <div class="feature-stack">
+            {% for row in selected_highlights.asset_rows %}
+            <article class="feature-row">
+                <div>
+                    <strong>{{ row.asset.name }}</strong>
+                    <p class="field-hint">{{ row.asset.type }}</p>
+                    <div class="tag-list">
+                        {% if row.asset.network %}<span class="tag mono">{{ row.asset.network }}</span>{% endif %}
+                        {% if row.asset.target %}<span class="tag mono">{{ row.asset.target }}</span>{% endif %}
+                        {% if row.asset.file %}<span class="tag mono">{{ row.asset.file }}</span>{% endif %}
+                    </div>
+                </div>
+                <div class="feature-stats">
+                    <span>{{ row.host_count }} Hosts</span>
+                    <span>{{ row.service_count }} Services</span>
+                    <span>{{ row.finding_count }} Finding refs</span>
+                </div>
+            </article>
+            {% endfor %}
+        </div>
+        {% else %}
+        <p class="field-hint">No assets registered yet.</p>
+        {% endif %}
+    </section>
+
+    <section class="card">
+        <p class="kicker">Host Pressure</p>
+        <h2 class="card-title">Most Interesting Hosts</h2>
+        {% if selected_highlights.top_hosts %}
+        <div class="feature-stack">
+            {% for row in selected_highlights.top_hosts %}
+            <article class="feature-row">
+                <div>
+                    <strong>{{ row.label }}</strong>
+                    <p class="field-hint">{{ row.service_preview or "No services" }}</p>
+                </div>
+                <div class="feature-stats">
+                    <span>{{ row.service_count }} Services</span>
+                    <span>{{ row.finding_count }} Findings</span>
+                    <span>{{ row.proof_count }} Proof sets</span>
+                </div>
+            </article>
+            {% endfor %}
+        </div>
+        {% else %}
+        <p class="field-hint">No hosts discovered yet.</p>
+        {% endif %}
+    </section>
+
+    <section class="card">
+        <p class="kicker">Finding Queue</p>
+        <h2 class="card-title">Leading Findings</h2>
+        {% if selected_highlights.top_findings %}
+        <div class="feature-stack">
+            {% for item in selected_highlights.top_findings %}
+            <article class="feature-row">
+                <div>
+                    <div class="tag-list">
+                        <span class="tag {{ severity_color(item.finding.severity) }}">{{ item.finding.severity }}</span>
+                        {% if item.finding.cvss is not none %}<span class="tag">CVSS {{ item.finding.cvss }}</span>{% endif %}
+                    </div>
+                    <strong>{{ item.finding.name }}</strong>
+                    <p class="field-hint">{{ item.host_label }}</p>
+                </div>
+                <a class="micro-link" href="{{ url_for('findings_page', finding_id=item.finding.finding_id) }}">Open</a>
+            </article>
+            {% endfor %}
+        </div>
+        {% else %}
+        <p class="field-hint">No findings yet.</p>
+        {% endif %}
+    </section>
+
+    <section class="card">
+        <p class="kicker">Evidence</p>
+        <h2 class="card-title">Screenshot Preview</h2>
+        {% if selected_highlights.screenshot_preview %}
+        <div class="mini-gallery">
+            {% for screenshot in selected_highlights.screenshot_preview %}
+            <article class="mini-shot">
+                <img class="proof-thumb screenshot-clickable" src="{{ url_for('serve_file', filepath=screenshot.file) }}" alt="{{ screenshot.host_ip }}:{{ screenshot.port }}">
+                <div class="proof-meta">
+                    <strong>{{ screenshot.host_ip }}:{{ screenshot.port }}</strong>
+                    <span>{{ screenshot.service }}</span>
+                </div>
+            </article>
+            {% endfor %}
+        </div>
+        {% else %}
+        <p class="field-hint">No screenshot capture saved yet.</p>
+        {% endif %}
+    </section>
+</section>
+
+<div id="edit-selected-project-modal" class="modal-shell" hidden>
+    <div class="modal-backdrop" data-modal-close="edit-selected-project-modal"></div>
+    <div class="modal-card medium">
+        <div class="modal-header">
+            <div>
+                <p class="kicker">Edit</p>
+                <h2 class="card-title">Project Details</h2>
+                <p class="panel-copy">Update metadata for {{ selected_project.name }}.</p>
+            </div>
+            <button type="button" class="modal-close" data-modal-close="edit-selected-project-modal">&times;</button>
+        </div>
+        <form action="{{ url_for('project_edit', project_id=selected_project.project_id) }}" method="post">
+            <div class="form-grid">
+                <label class="field">
+                    <span>Project Name</span>
+                    <input class="input" type="text" name="name" value="{{ selected_project.name }}" required>
+                </label>
+                <label class="field">
+                    <span>External ID</span>
+                    <input class="input" type="text" name="external_id" value="{{ selected_project.external_id }}">
+                </label>
+                <label class="field full-span">
+                    <span>Description</span>
+                    <textarea class="textarea" name="description" rows="5">{{ selected_project.description }}</textarea>
+                </label>
+                <label class="field">
+                    <span>AD Domain</span>
+                    <input class="input" type="text" name="ad_domain" value="{{ selected_project.ad_domain }}">
+                </label>
+                <label class="field">
+                    <span>DC IP / Hostname</span>
+                    <input class="input" type="text" name="ad_dc_ip" value="{{ selected_project.ad_dc_ip }}">
+                </label>
+            </div>
+            <div class="button-row">
+                <button class="button" type="submit">Save Project</button>
+                <button class="button quiet" type="button" data-modal-close="edit-selected-project-modal">Cancel</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% else %}
+<section class="empty-stage">
+    <p class="kicker">Projects</p>
+    <h1>No project selected</h1>
+    <p class="page-intro">Choose a project from the left rail or create one to begin.</p>
+    <button type="button" class="button" data-modal-open="create-project-modal">Create Project</button>
+</section>
+{% endif %}
+{% endblock %}
