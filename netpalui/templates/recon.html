@@ -1,14 +1,6 @@
 {% extends "base.html" %}
 {% block title %}Recon | NetPal{% endblock %}
 {% block content %}
-<section class="page-header">
-    <div class="page-header-copy">
-        <p class="kicker">Recon</p>
-        <h1>Start Discovery and Scans</h1>
-        <p class="page-intro">Run the same recon workflow as the TUI, including discovered-host targeting, chunk files, auto-tools, exclusions, and custom nmap options.</p>
-    </div>
-</section>
-
 <form class="card" action="{{ url_for('recon_start') }}" method="post">
     <div class="form-grid">
         <label class="field">

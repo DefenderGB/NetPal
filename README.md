@@ -190,6 +190,10 @@ netpal project-edit
 netpal hosts
 netpal findings
 
+# Create or update asset descriptions
+netpal assets single --name JumpHost --target 10.0.0.20 --description "Operator bastion"
+netpal assets --edit-description JumpHost --description "Rotated to new bastion"
+
 # Export a project archive from local scan_results/
 netpal export "My Pentest"
 ```
@@ -227,8 +231,11 @@ NetPal now stores projects, findings, and evidence locally under `scan_results/`
 Additional local data paths:
 
 - Project descriptions live in `metadata.description`.
+- Asset descriptions live alongside each asset entry in the project JSON.
 - Testcase registries live in `scan_results/<project_id>_testcases.json`.
 - AD outputs live in `scan_results/<project_id>/ad_scan/`.
+
+In the web UI, the `Test Cases` page accepts either a direct CSV upload or a local CSV path. Uploaded CSVs are copied into `scan_results/<project_id>/uploads/` before loading.
 
 ## Active Directory Scanning
 

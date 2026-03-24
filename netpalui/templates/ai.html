@@ -1,14 +1,6 @@
 {% extends "base.html" %}
 {% block title %}AI | NetPal{% endblock %}
 {% block content %}
-<section class="page-header">
-    <div class="page-header-copy">
-        <p class="kicker">AI</p>
-        <h1>Review and Enhance</h1>
-        <p class="page-intro">Run AI review against collected evidence, then enhance the resulting findings in place.</p>
-    </div>
-</section>
-
 <section class="grid two-up">
     <form class="card" action="{{ url_for('ai_start') }}" method="post">
         <input type="hidden" name="mode" value="review">

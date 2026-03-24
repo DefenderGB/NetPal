@@ -187,6 +187,108 @@ def _deduplicate_hosts_by_identity(hosts):
     return deduped
 
 
+def _normalize_network_id(network_id):
+    """Return a stable network identifier string."""
+    return network_id or "unknown"
+
+
+def _resolve_project_hosts_for_scan_targets(project, asset, scan_targets):
+    """Resolve stored project hosts for a list of scan targets.
+
+    Matching prefers ``host.scan_target`` so discovered hostname-based
+    rescans preserve the original host identity, then falls back to raw IP.
+    When an asset is available, its host associations are preferred first.
+    """
+    if not project or not scan_targets:
+        return []
+
+    candidate_pools = []
+    asset_id = getattr(asset, "asset_id", None)
+    if asset_id is not None:
+        asset_hosts = [host for host in project.hosts if asset_id in getattr(host, "assets", [])]
+        if asset_hosts:
+            candidate_pools.append(asset_hosts)
+    candidate_pools.append(list(project.hosts))
+
+    resolved_hosts = []
+    seen_identities = set()
+
+    for scan_target in scan_targets:
+        matches = []
+        for pool in candidate_pools:
+            exact_matches = [host for host in pool if host.scan_target == scan_target]
+            if exact_matches:
+                matches = exact_matches
+                break
+
+            ip_matches = [host for host in pool if host.ip == scan_target]
+            if ip_matches:
+                matches = ip_matches
+                break
+
+        for host in matches:
+            identity = host.identity_key
+            if identity in seen_identities:
+                continue
+            seen_identities.add(identity)
+            resolved_hosts.append(host)
+
+    return resolved_hosts
+
+
+def _group_scan_targets_by_network(project, asset, scan_targets, fallback_network_id="unknown"):
+    """Group scan targets by the saved host network identity when available."""
+    normalized_targets = [target for target in (scan_targets or []) if target]
+    if not normalized_targets:
+        return []
+
+    resolved_hosts = _resolve_project_hosts_for_scan_targets(project, asset, normalized_targets)
+    if not resolved_hosts:
+        return [(_normalize_network_id(fallback_network_id), normalized_targets)]
+
+    grouped_targets = {}
+    resolved_target_values = set()
+
+    for host in resolved_hosts:
+        effective_network_id = _normalize_network_id(getattr(host, "network_id", None))
+        if effective_network_id == "unknown":
+            effective_network_id = _normalize_network_id(fallback_network_id)
+
+        group = grouped_targets.setdefault(effective_network_id, [])
+        scan_target = host.scan_target
+        if scan_target not in group:
+            group.append(scan_target)
+
+        resolved_target_values.add(scan_target)
+        resolved_target_values.add(host.ip)
+
+    unresolved_targets = [target for target in normalized_targets if target not in resolved_target_values]
+    if unresolved_targets:
+        fallback_group = grouped_targets.setdefault(_normalize_network_id(fallback_network_id), [])
+        for target in unresolved_targets:
+            if target not in fallback_group:
+                fallback_group.append(target)
+
+    return list(grouped_targets.items())
+
+
+def _select_network_id_for_target(project, asset, target, fallback_network_id="unknown"):
+    """Pick the saved host network identity for a specific target when unambiguous."""
+    resolved_hosts = _resolve_project_hosts_for_scan_targets(project, asset, [target])
+    known_network_ids = []
+
+    for host in resolved_hosts:
+        candidate = _normalize_network_id(getattr(host, "network_id", None))
+        if candidate == "unknown" or candidate in known_network_ids:
+            continue
+        known_network_ids.append(candidate)
+
+    if len(known_network_ids) == 1:
+        return known_network_ids[0]
+
+    return _normalize_network_id(fallback_network_id)
+
+
 def execute_recon_scan(scanner, asset, project, target, interface, scan_type, custom_ports,
                        speed, skip_discovery, verbose, exclude, exclude_ports, callback,
                        host_ips=None, chunk_file=None, network_id="unknown"):
@@ -254,61 +356,95 @@ def execute_recon_scan(scanner, asset, project, target, interface, scan_type, cu
         if host_ips is None:
             asset_hosts = [h for h in project.hosts if asset.asset_id in h.assets]
             host_ips = [h.scan_target for h in asset_hosts]
-        
-        if len(host_ips) > 50:
-            # Use pre-created chunk file if provided, otherwise create one
-            scan_dir = get_scan_results_dir(project.project_id, asset.get_identifier())
-            ensure_dir(scan_dir)
+        grouped_targets = _group_scan_targets_by_network(project, asset, host_ips, network_id)
+        hosts = []
+        error_messages = []
+        nmap_cmd_parts = []
 
-            if chunk_file:
-                list_file = chunk_file
+        if callback and len(grouped_targets) > 1:
+            callback("\n[INFO] Grouping discovered hosts by saved network identity before scanning.\n")
+
+        for idx, (group_network_id, group_targets) in enumerate(grouped_targets, start=1):
+            if not group_targets:
+                continue
+
+            if len(grouped_targets) > 1 and callback:
+                callback(
+                    f"[INFO] Network group {idx}/{len(grouped_targets)}: "
+                    f"{group_network_id} ({len(group_targets)} target(s))\n"
+                )
+
+            if len(group_targets) > 50:
+                # Use pre-created chunk file when it already represents this
+                # exact group; otherwise create a temporary group-specific list.
+                scan_dir = get_scan_results_dir(project.project_id, asset.get_identifier())
+                ensure_dir(scan_dir)
+
+                use_existing_chunk = chunk_file and len(grouped_targets) == 1
+                if use_existing_chunk:
+                    list_file = chunk_file
+                else:
+                    ts = int(time.time())
+                    safe_network_id = group_network_id.replace(":", "_").replace("/", "_")
+                    list_file = os.path.join(scan_dir, f"active_hosts_{safe_network_id}_{ts}.txt")
+                    with open(list_file, 'w') as f:
+                        f.write('\n'.join(group_targets))
+
+                try:
+                    nmap_cmd_parts.append(f"{nmap_cmd} -iL {list_file}")
+                    print(
+                        f"\n{Fore.CYAN}[INFO] Using host list file: {os.path.basename(list_file)} "
+                        f"({len(group_targets)} targets){Style.RESET_ALL}"
+                    )
+
+                    group_hosts, group_error = scanner.scan_list(
+                        None,
+                        scan_type=scan_type,
+                        project_name=project.project_id,
+                        asset_name=asset.get_identifier(),
+                        interface=interface,
+                        exclude=exclude,
+                        exclude_ports=exclude_ports,
+                        callback=callback,
+                        use_file=True,
+                        file_path=list_file,
+                        speed=speed,
+                        skip_discovery=skip_discovery,
+                        verbose=verbose,
+                        network_id=group_network_id,
+                    )
+                finally:
+                    if not use_existing_chunk:
+                        try:
+                            os.remove(list_file)
+                        except Exception:
+                            pass
             else:
-                ts = int(time.time())
-                list_file = os.path.join(scan_dir, f"active_hosts_{ts}.txt")
-                with open(list_file, 'w') as f:
-                    f.write('\n'.join(host_ips))
+                targets_str = ','.join(group_targets)
+                nmap_cmd_parts.append(f"{nmap_cmd} {targets_str}")
+                group_hosts, group_error = scanner.scan_list(
+                    group_targets,
+                    scan_type=scan_type,
+                    project_name=project.project_id,
+                    asset_name=asset.get_identifier(),
+                    interface=interface,
+                    exclude=exclude,
+                    exclude_ports=exclude_ports,
+                    callback=callback,
+                    speed=speed,
+                    skip_discovery=skip_discovery,
+                    verbose=verbose,
+                    network_id=group_network_id,
+                )
 
-            nmap_cmd += f" -iL {list_file}"
-            print(f"\n{Fore.CYAN}[INFO] Using host list file: {os.path.basename(list_file)} ({len(host_ips)} targets){Style.RESET_ALL}")
-            
-            # Use scan_list with file
-            hosts, error = scanner.scan_list(
-                None,
-                scan_type=scan_type,
-                project_name=project.project_id,
-                asset_name=asset.get_identifier(),
-                interface=interface,
-                exclude=exclude,
-                exclude_ports=exclude_ports,
-                callback=callback,
-                use_file=True,
-                file_path=list_file,
-                speed=speed,
-                skip_discovery=skip_discovery,
-                verbose=verbose,
-                network_id=network_id,
-            )
-        else:
-            # Use comma-separated list for ≤50 hosts
-            targets_str = ','.join(host_ips)
-            nmap_cmd += f" {targets_str}"
-            
-            # Use scan_list with host list
-            hosts, error = scanner.scan_list(
-                host_ips,
-                scan_type=scan_type,
-                project_name=project.project_id,
-                asset_name=asset.get_identifier(),
-                interface=interface,
-                exclude=exclude,
-                exclude_ports=exclude_ports,
-                callback=callback,
-                speed=speed,
-                skip_discovery=skip_discovery,
-                verbose=verbose,
-                network_id=network_id,
-            )
-    
+            if group_hosts:
+                hosts.extend(group_hosts)
+            if group_error:
+                error_messages.append(group_error)
+
+        error = "; ".join(error_messages) if error_messages else None
+        nmap_cmd = " | ".join(nmap_cmd_parts) if nmap_cmd_parts else nmap_cmd
+
     elif target == asset.get_identifier():
         # Scan full asset
         if asset.type == 'network':
@@ -346,6 +482,7 @@ def execute_recon_scan(scanner, asset, project, target, interface, scan_type, cu
             )
         else:  # single
             nmap_cmd += f" {asset.target}"
+            target_network_id = _select_network_id_for_target(project, asset, asset.target, network_id)
             hosts, error = scanner.scan_single(
                 asset.target,
                 scan_type=scan_type,
@@ -359,11 +496,12 @@ def execute_recon_scan(scanner, asset, project, target, interface, scan_type, cu
                 speed=speed,
                 skip_discovery=skip_discovery,
                 verbose=verbose,
-                network_id=network_id,
+                network_id=target_network_id,
             )
     else:
         # Scan specific host
         nmap_cmd += f" {target}"
+        target_network_id = _select_network_id_for_target(project, asset, target, network_id)
         hosts, error = scanner.scan_single(
             target,
             scan_type=scan_type,
@@ -377,7 +515,7 @@ def execute_recon_scan(scanner, asset, project, target, interface, scan_type, cu
             speed=speed,
             skip_discovery=skip_discovery,
             verbose=verbose,
-            network_id=network_id,
+            network_id=target_network_id,
         )
     
     return hosts, error, nmap_cmd

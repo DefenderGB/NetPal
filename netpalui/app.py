@@ -27,7 +27,7 @@ from flask import (
 )
 
 from netpal.utils import operator_actions as actions
-from netpal.utils.persistence.file_utils import resolve_scan_results_path
+from netpal.utils.persistence.file_utils import ensure_dir, resolve_scan_results_path
 from netpal.utils.persistence.project_paths import get_base_scan_results_dir
 from netpal.utils.scanning.scan_helpers import list_chunk_files
 
@@ -69,7 +69,7 @@ def _host_label(host, duplicate_ips: set[str] | None = None) -> str:
 
 def _project_metrics(project) -> dict[str, int]:
     if not project:
-        return {"assets": 0, "hosts": 0, "services": 0, "findings": 0, "testcases": 0}
+        return {"assets": 0, "hosts": 0, "services": 0, "findings": 0, "testcases": 0, "proofs": 0}
     testcase_count = len(actions.get_testcase_manager().get_registry(project.project_id).test_cases)
     return {
         "assets": len(project.assets),
@@ -77,6 +77,7 @@ def _project_metrics(project) -> dict[str, int]:
         "services": sum(len(host.services) for host in project.hosts),
         "findings": len(project.findings),
         "testcases": testcase_count,
+        "proofs": sum(len(service.proofs) for host in project.hosts for service in host.services),
     }
 
 
@@ -89,6 +90,24 @@ def _decorate_project_registry_entry(entry: dict) -> dict:
     metadata = decorated.get("metadata", {}) or {}
     decorated["description"] = metadata.get("description", "")
     return decorated
+
+
+def _asset_scope_label(asset) -> str:
+    return asset.network or asset.target or asset.file or asset.name
+
+
+def _project_rows(active_project_id: str = "") -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for entry in actions.list_projects():
+        row = _decorate_project_registry_entry(entry)
+        project = actions.load_project_by_id(row.get("id", ""))
+        row["project"] = project
+        row["metrics"] = _project_metrics(project)
+        row["is_active"] = row.get("id", "") == active_project_id
+        row["asset_previews"] = [_asset_scope_label(asset) for asset in (project.assets[:3] if project else [])]
+        row["asset_overflow"] = max((len(project.assets) if project else 0) - len(row["asset_previews"]), 0)
+        rows.append(row)
+    return rows
 
 
 def _read_text_file(filepath: str) -> str | None:
@@ -340,6 +359,17 @@ def _tool_options() -> list[tuple[str, str]]:
 
 
 def _proof_files_for_service(service) -> list[dict[str, Any]]:
+    def _preview_content(content: str, *, max_lines: int = 80, max_chars: int = 5000) -> tuple[str, bool]:
+        lines = content.splitlines()
+        truncated = len(lines) > max_lines
+        preview = "\n".join(lines[:max_lines]) if truncated else content
+        if len(preview) > max_chars:
+            preview = preview[:max_chars].rstrip()
+            truncated = True
+        if truncated:
+            preview = preview.rstrip() + "\n..."
+        return preview, truncated
+
     files = []
     for proof in service.proofs:
         proof_type = proof.get("type", "unknown")
@@ -362,29 +392,45 @@ def _proof_files_for_service(service) -> list[dict[str, Any]]:
             elif ext == ".txt":
                 content = _read_text_file(full_path)
                 if content and content.strip():
+                    preview, truncated = _preview_content(content)
                     info["type"] = "text"
-                    info["content"] = content
+                    info["content"] = preview
+                    info["is_truncated"] = truncated
             elif ext == ".jsonl":
                 items = _read_jsonl_file(full_path)
                 if items:
+                    preview, truncated = _preview_content(json.dumps(items, indent=2))
                     info["type"] = "jsonl"
-                    info["content"] = json.dumps(items, indent=2)
+                    info["content"] = preview
+                    info["is_truncated"] = truncated
             files.append(info)
     return files
 
 
-def _host_detail_payload(host) -> dict[str, Any] | None:
-    if not host:
+def _host_detail_payload(project, host) -> dict[str, Any] | None:
+    if not project or not host:
         return None
     service_details = []
     for service in sorted(host.services, key=lambda item: (item.port, item.protocol)):
+        proof_files = _proof_files_for_service(service)
         service_details.append(
             {
                 "service": service,
-                "proof_files": _proof_files_for_service(service),
+                "proof_files": proof_files,
             }
         )
-    return {"host": host, "services": service_details}
+    asset_names = [
+        asset.name
+        for asset in project.assets
+        if asset.asset_id in getattr(host, "assets", [])
+    ]
+    return {
+        "host": host,
+        "services": service_details,
+        "asset_names": asset_names,
+        "service_count": len(service_details),
+        "proof_count": sum(len(item["proof_files"]) for item in service_details),
+    }
 
 
 def _hosts_table(project) -> list[dict[str, Any]]:
@@ -402,7 +448,7 @@ def _hosts_table(project) -> list[dict[str, Any]]:
             {
                 "host": host,
                 "label": _host_label(host, duplicate_ips),
-                "network": getattr(host, "network_id", "unknown") if host.ip in duplicate_ips else "-",
+                "network": getattr(host, "network_id", "unknown") or "unknown",
                 "services": len(host.services),
                 "findings": len([finding for finding in project.findings if finding.host_id == host.host_id]),
                 "tools": sum(len(service.proofs) for service in host.services),
@@ -493,6 +539,49 @@ def _ensure_allowed(view_id: str):
         flash(f"{actions.VIEW_LABELS[view_id]} is not available yet.", "warning")
         return redirect(url_for("projects_page"))
     return None
+
+
+def _redirect_with_fallback(return_to: str | None, endpoint: str, **values):
+    target = str(return_to or "").strip()
+    if target.startswith("/") and not target.startswith("//"):
+        return redirect(target)
+    return redirect(url_for(endpoint, **values))
+
+
+def _asset_target_data_from_form(asset_type: str, form, *, current_asset=None):
+    asset_type = str(asset_type or "").strip()
+    if asset_type == "list":
+        file_path = form.get("file_path", "").strip()
+        targets = form.get("targets", "").strip()
+        if file_path:
+            return {"file": file_path}
+        if targets:
+            return targets
+        if current_asset is not None and getattr(current_asset, "file", ""):
+            return None
+        raise ValueError("Provide comma-separated targets or a .txt file path for a list asset.")
+    target_value = form.get("target", "").strip()
+    if not target_value and current_asset is not None:
+        target_value = current_asset.network if asset_type == "network" else current_asset.target
+    return target_value
+
+
+def _save_uploaded_testcase_csv(project, storage) -> str:
+    filename = str(getattr(storage, "filename", "") or "").strip()
+    if not filename:
+        raise ValueError("Choose a CSV file to upload.")
+    if not filename.lower().endswith(".csv"):
+        raise ValueError("Test case upload must be a .csv file.")
+
+    from netpal.utils.naming_utils import sanitize_for_filename
+
+    base_name = os.path.splitext(os.path.basename(filename))[0]
+    safe_name = sanitize_for_filename(base_name) or "testcases"
+    upload_dir = os.path.join(get_base_scan_results_dir(), project.project_id, "uploads")
+    ensure_dir(upload_dir)
+    saved_path = os.path.join(upload_dir, f"{safe_name}_{int(time.time())}.csv")
+    storage.save(saved_path)
+    return saved_path
 
 
 @dataclass
@@ -597,6 +686,7 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
         endpoint_to_view = {
             "projects_page": actions.VIEW_PROJECTS,
             "project_overview": actions.VIEW_PROJECTS,
+            "project_page": actions.VIEW_ASSETS,
             "assets_page": actions.VIEW_ASSETS,
             "recon_page": actions.VIEW_RECON,
             "tools_page": actions.VIEW_TOOLS,
@@ -610,7 +700,7 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
         }
         view_urls = {
             actions.VIEW_PROJECTS: url_for("projects_page"),
-            actions.VIEW_ASSETS: url_for("assets_page"),
+            actions.VIEW_ASSETS: url_for("project_page"),
             actions.VIEW_RECON: url_for("recon_page"),
             actions.VIEW_TOOLS: url_for("tools_page"),
             actions.VIEW_HOSTS: url_for("hosts_page"),
@@ -622,12 +712,6 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
             actions.VIEW_SETTINGS: url_for("settings_page"),
         }
         current_view = endpoint_to_view.get(request.endpoint or "", actions.VIEW_PROJECTS)
-        sidebar_projects = [_decorate_project_registry_entry(entry) for entry in actions.list_projects()]
-        current_project_id = (
-            request.view_args.get("project_id")
-            if request.view_args and request.view_args.get("project_id")
-            else request.args.get("selected") or (g.active_project.project_id if g.active_project else "")
-        )
         nav_items = [
             {
                 "view_id": view_id,
@@ -642,8 +726,6 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
             "nav_items": nav_items,
             "active_project": g.active_project,
             "active_metrics": _project_metrics(g.active_project),
-            "sidebar_projects": sidebar_projects,
-            "current_project_id": current_project_id,
             "settings_files": actions.SETTINGS_FILES,
             "rerun_autotools_options": actions.RERUN_AUTOTOOLS_OPTIONS,
             "credential_type_options": actions.AUTO_TOOL_CREDENTIAL_TYPE_OPTIONS,
@@ -656,19 +738,14 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
 
     @app.route("/projects")
     def projects_page():
-        projects = [_decorate_project_registry_entry(entry) for entry in actions.list_projects()]
-        selected_project_id = request.args.get("selected") or (g.active_project.project_id if g.active_project else "")
-        if not selected_project_id and projects:
-            selected_project_id = projects[0]["id"]
-        selected_project = actions.load_project_by_id(selected_project_id) if selected_project_id else None
-        selected_highlights = _project_highlights(selected_project)
+        active_project = g.active_project
+        project_rows = _project_rows(active_project.project_id if active_project else "")
+        active_highlights = _project_highlights(active_project)
         return render_template(
             "projects.html",
-            projects=projects,
-            selected_project=selected_project,
-            selected_project_id=selected_project_id,
-            selected_project_metrics=_project_metrics(selected_project),
-            selected_highlights=selected_highlights,
+            projects=project_rows,
+            active_highlights=active_highlights,
+            active_project_metrics=_project_metrics(active_project),
         )
 
     @app.route("/projects/create", methods=["POST"])
@@ -693,10 +770,10 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
                 flash(f"Project '{project.name}' created, but the starter asset failed: {result['asset_error']}", "warning")
             else:
                 flash(f"Project '{project.name}' created.", "success")
-            return redirect(url_for("projects_page", selected=project.project_id))
+            return _redirect_with_fallback(request.form.get("return_to"), "projects_page")
         except Exception as exc:
             flash(actions.format_exception(exc), "error")
-            return redirect(url_for("projects_page"))
+            return _redirect_with_fallback(request.form.get("return_to"), "projects_page")
 
     @app.route("/projects/activate", methods=["POST"])
     def project_activate():
@@ -704,10 +781,10 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
         try:
             project = actions.project_switch(identifier, g.config)
             flash(f"Active project switched to '{project.name}'.", "success")
-            return redirect(url_for("projects_page", selected=project.project_id))
+            return _redirect_with_fallback(request.form.get("return_to"), "projects_page")
         except Exception as exc:
             flash(actions.format_exception(exc), "error")
-            return redirect(url_for("projects_page"))
+            return _redirect_with_fallback(request.form.get("return_to"), "projects_page")
 
     @app.route("/projects/<project_id>/edit", methods=["POST"])
     def project_edit(project_id: str):
@@ -727,7 +804,7 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
             flash(f"Project '{project.name}' updated successfully.", "success")
         except Exception as exc:
             flash(actions.format_exception(exc), "error")
-        return redirect(url_for("projects_page", selected=project_id))
+        return _redirect_with_fallback(request.form.get("return_to"), "projects_page")
 
     @app.route("/projects/<project_id>/delete", methods=["POST"])
     def project_delete(project_id: str):
@@ -741,34 +818,45 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
             flash(actions.format_exception(exc), "error")
         return redirect(url_for("projects_page"))
 
+    @app.route("/project")
+    def project_page():
+        denied = _ensure_allowed(actions.VIEW_ASSETS)
+        if denied:
+            return denied
+        if not g.active_project:
+            return redirect(url_for("projects_page"))
+        project = g.active_project
+        return render_template(
+            "assets.html",
+            project=project,
+            project_metrics=_project_metrics(project),
+            project_highlights=_project_highlights(project),
+        )
+
     @app.route("/project/<project_id>")
     def project_overview(project_id: str):
         project = actions.load_project_by_id(project_id)
         if not project:
             abort(404)
-        metadata = _build_project_overview(project)
-        highlights = _project_highlights(project)
-        return render_template(
-            "project.html",
-            project=project,
-            project_id=project.project_id,
-            project_description=project.description,
-            highlights=highlights,
-            **metadata,
-        )
+        if g.active_project and g.active_project.project_id == project_id:
+            return redirect(url_for("project_page"))
+        flash("Make a project active from Home to manage it in the Project tab.", "warning")
+        return redirect(url_for("projects_page"))
 
     @app.route("/assets")
     def assets_page():
         denied = _ensure_allowed(actions.VIEW_ASSETS)
         if denied:
             return denied
-        selected_asset_name = request.args.get("asset", "")
-        selected_asset = None
-        if g.active_project and selected_asset_name:
-            selected_asset = next((item for item in g.active_project.assets if item.name == selected_asset_name), None)
-        if not selected_asset and g.active_project and g.active_project.assets:
-            selected_asset = g.active_project.assets[0]
-        return render_template("assets.html", selected_asset=selected_asset)
+        if not g.active_project:
+            return redirect(url_for("projects_page"))
+        project = g.active_project
+        return render_template(
+            "assets.html",
+            project=project,
+            project_metrics=_project_metrics(project),
+            project_highlights=_project_highlights(project),
+        )
 
     @app.route("/assets/create", methods=["POST"])
     def asset_create():
@@ -781,19 +869,62 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
 
         asset_type = request.form.get("asset_type", "").strip()
         name = request.form.get("name", "").strip()
+        description = request.form.get("description", "").strip()
         try:
-            if asset_type == "list":
-                file_path = request.form.get("file_path", "").strip()
-                targets = request.form.get("targets", "").strip()
-                target_data = {"file": file_path} if file_path else targets
-            else:
-                target_data = request.form.get("target", "").strip()
-            asset = actions.asset_create(g.active_project, asset_type, name, target_data)
+            target_data = _asset_target_data_from_form(asset_type, request.form)
+            asset = actions.asset_create(g.active_project, asset_type, name, target_data, description=description)
             flash(f"Created asset '{asset.name}' ({asset.type}).", "success")
-            return redirect(url_for("assets_page", asset=asset.name))
+            return _redirect_with_fallback(request.form.get("return_to"), "project_page")
         except Exception as exc:
             flash(actions.format_exception(exc), "error")
-            return redirect(url_for("assets_page"))
+            return _redirect_with_fallback(request.form.get("return_to"), "project_page")
+
+    @app.route("/assets/edit", methods=["POST"])
+    def asset_edit():
+        denied = _ensure_allowed(actions.VIEW_ASSETS)
+        if denied:
+            return denied
+        if not g.active_project:
+            flash("No active project.", "error")
+            return redirect(url_for("projects_page"))
+
+        asset_name = request.form.get("asset_name", "").strip()
+        asset = next((item for item in g.active_project.assets if item.name == asset_name), None)
+        if asset is None:
+            flash(f"Asset '{asset_name}' not found.", "error")
+            return _redirect_with_fallback(request.form.get("return_to"), "project_page")
+        try:
+            target_data = _asset_target_data_from_form(asset.type, request.form, current_asset=asset)
+            updated = actions.asset_edit(
+                g.active_project,
+                asset_name,
+                name=request.form.get("name", "").strip(),
+                description=request.form.get("description", "").strip(),
+                target_data=target_data,
+            )
+            flash(f"Updated asset '{updated.name}'.", "success")
+        except Exception as exc:
+            flash(actions.format_exception(exc), "error")
+        return _redirect_with_fallback(request.form.get("return_to"), "project_page")
+
+    @app.route("/assets/edit-description", methods=["POST"])
+    def asset_edit_description():
+        denied = _ensure_allowed(actions.VIEW_ASSETS)
+        if denied:
+            return denied
+        if not g.active_project:
+            flash("No active project.", "error")
+            return redirect(url_for("projects_page"))
+
+        asset_name = request.form.get("asset_name", "").strip()
+        description = request.form.get("description", "")
+        try:
+            asset = actions.asset_edit_description(g.active_project, asset_name, description)
+            flash(f"Updated description for asset '{asset.name}'.", "success")
+            return _redirect_with_fallback(request.form.get("return_to"), "project_page")
+        except Exception as exc:
+            flash(actions.format_exception(exc), "error")
+            return _redirect_with_fallback(request.form.get("return_to"), "project_page")
 
     @app.route("/assets/delete", methods=["POST"])
     def asset_delete():
@@ -809,7 +940,7 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
             flash(f"Asset '{asset_name}' deleted.", "success")
         except Exception as exc:
             flash(actions.format_exception(exc), "error")
-        return redirect(url_for("assets_page"))
+        return _redirect_with_fallback(request.form.get("return_to"), "project_page")
 
     @app.route("/recon")
     def recon_page():
@@ -910,7 +1041,7 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
             "hosts.html",
             rows=_hosts_table(g.active_project),
             selected_host=selected_host,
-            selected_host_detail=_host_detail_payload(selected_host),
+            selected_host_detail=_host_detail_payload(g.active_project, selected_host),
             duplicate_ips=_duplicate_ip_set(g.active_project),
         )
 
@@ -1086,7 +1217,11 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
             action_name = request.form.get("action_name", "")
             try:
                 if action_name == "load_csv":
-                    result = actions.testcase_load(g.active_project, request.form.get("csv_path", "").strip(), g.config)
+                    upload = request.files.get("csv_file")
+                    csv_path = request.form.get("csv_path", "").strip()
+                    if upload and getattr(upload, "filename", "").strip():
+                        csv_path = _save_uploaded_testcase_csv(g.active_project, upload)
+                    result = actions.testcase_load(g.active_project, csv_path, g.config)
                     if result.get("error"):
                         raise ValueError(result["error"])
                     flash(f"Loaded {result.get('total', 0)} test cases from CSV.", "success")

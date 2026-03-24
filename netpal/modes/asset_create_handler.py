@@ -20,6 +20,8 @@ class AssetCreateHandler(ModeHandler):
             return True  # Listing doesn't need target args
         if self.args.delete:
             return True  # Deletion doesn't need target args
+        if getattr(self.args, 'edit_description', None):
+            return True  # Editing description doesn't need target args
         if getattr(self.args, 'clear_orphans', False):
             return True  # Clearing orphans doesn't need target args
 
@@ -70,6 +72,9 @@ class AssetCreateHandler(ModeHandler):
         if self.args.delete:
             return self._delete_asset(self.args.delete)
 
+        if getattr(self.args, 'edit_description', None):
+            return self._edit_description(self.args.edit_description)
+
         # Handle --clear
         if getattr(self.args, 'clear_orphans', False):
             return self._clear_orphan_hosts()
@@ -108,10 +113,13 @@ class AssetCreateHandler(ModeHandler):
             asset = create_asset_headless(
                 self.project, args.type, args.name,
                 target_data,
+                description=getattr(args, "description", "") or "",
             )
 
             print(f"{Fore.GREEN}[SUCCESS] Created asset: {asset.name} ({asset.type}){Style.RESET_ALL}")
             print(f"  Identifier: {asset.get_identifier()}")
+            if asset.description:
+                print(f"  Description: {asset.description}")
 
             return asset
         except ValueError as e:
@@ -133,6 +141,8 @@ class AssetCreateHandler(ModeHandler):
                 if list_total is not None:
                     hosts_display = f"{host_count} ({list_total} in list)"
             print(f"{a.asset_id:<5} {a.name:<20} {a.type:<10} {a.get_identifier():<30} {hosts_display:<20}")
+            if a.description:
+                print(f"      Description: {a.description}")
         return True
 
     @staticmethod
@@ -164,6 +174,23 @@ class AssetCreateHandler(ModeHandler):
         try:
             delete_asset_headless(self.project, name)
             print(f"{Fore.GREEN}[SUCCESS] Deleted asset: {name}{Style.RESET_ALL}")
+            return True
+        except ValueError as e:
+            print(f"{Fore.RED}[ERROR] {e}{Style.RESET_ALL}")
+            return False
+
+    def _edit_description(self, name):
+        from ..utils import operator_actions as actions
+
+        try:
+            asset = actions.asset_edit_description(
+                self.project,
+                name,
+                getattr(self.args, "description", "") or "",
+            )
+            rendered = asset.description or "(cleared)"
+            print(f"{Fore.GREEN}[SUCCESS] Updated description for asset: {asset.name}{Style.RESET_ALL}")
+            print(f"  Description: {rendered}")
             return True
         except ValueError as e:
             print(f"{Fore.RED}[ERROR] {e}{Style.RESET_ALL}")

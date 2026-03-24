@@ -1,13 +1,12 @@
 {% extends "base.html" %}
 {% block title %}Findings | NetPal{% endblock %}
 {% block content %}
-<section class="page-header">
-    <div class="page-header-copy">
+<section class="page-header compact-header">
+    <div class="page-header-copy compact-toolbar-copy">
         <p class="kicker">Findings</p>
-        <h1>Findings and Manual Entries</h1>
-        <p class="page-intro">Review current findings and add manual findings with host, port, proof-file, CVSS, CWE, impact, and remediation details.</p>
+        <h1>Findings</h1>
     </div>
-    <div class="page-header-actions">
+    <div class="page-header-actions compact-toolbar-actions">
         <button type="button" class="button" data-modal-open="create-finding-modal">Create Finding</button>
         <a href="{{ url_for('ai_page') }}" class="button quiet">Open AI</a>
     </div>

@@ -211,6 +211,37 @@ class TUIViewSmokeTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIn("Services: 2", detail_text)
                 self.assertIn("Test Cases: 2", detail_text)
 
+    async def test_assets_view_shows_description_and_enables_edit_description_action(self):
+        with mock.patch("netpal.textual_ui.app._list_projects", return_value=[]):
+            app = NetPalApp()
+            app.config["project_name"] = ""
+
+            async with app.run_test(size=(120, 40)) as pilot:
+                project = Project(name="Assets")
+                project.assets = [
+                    SimpleNamespace(
+                        asset_id=0,
+                        name="Jump Host",
+                        associated_host=[],
+                        type="single",
+                        target="10.0.0.20",
+                        description="Operator bastion",
+                        get_identifier=lambda: "10.0.0.20",
+                    )
+                ]
+                app.project = project
+                app.action_goto_assets()
+                await pilot.pause()
+
+                table = app.query_one("#asset-table", DataTable)
+                table.cursor_coordinate = (0, 0)
+                table.action_select_cursor()
+                await pilot.pause()
+
+                detail_text = str(app.query_one("#asset-detail", Static).render())
+                self.assertIn("Description: Operator bastion", detail_text)
+                self.assertFalse(app.query_one("#btn-edit-asset-description", TextAction).disabled)
+
     async def test_settings_view_switches_between_editable_json_files(self):
         def load_document(filename: str):
             if filename == "creds.json":
@@ -487,6 +518,48 @@ class TUIViewSmokeTests(unittest.IsolatedAsyncioTestCase):
                 current = select.query_one("SelectCurrent")
                 self.assertEqual(select.region.height, 1)
                 self.assertEqual(current.region.height, 1)
+
+    async def test_recon_view_passes_detected_network_id_to_non_discovery_scans(self):
+        network_context = SimpleNamespace(network_id="gateway:10.0.0.1", label="Lab")
+
+        with (
+            mock.patch("netpal.textual_ui.app._list_projects", return_value=[]),
+            mock.patch("netpal.textual_ui.app._get_interfaces_with_valid_ips", return_value=[("eth0", "10.0.0.5")]),
+            mock.patch("netpal.utils.network_context.detect_network_context", return_value=network_context),
+            mock.patch("netpal.utils.scanning.scan_helpers.execute_recon_scan", return_value=([], None, "")) as mock_execute,
+        ):
+            app = NetPalApp()
+            app.config["project_name"] = ""
+            app.config["network_interface"] = "eth0"
+
+            async with app.run_test(size=(120, 40)) as pilot:
+                project = Project(name="Recon Context")
+                project.assets = [
+                    SimpleNamespace(
+                        asset_id=0,
+                        name="net",
+                        associated_host=[],
+                        type="network",
+                        network="10.0.0.0/24",
+                        get_identifier=lambda: "10.0.0.0/24",
+                    )
+                ]
+                app.project = project
+                app.action_goto_recon()
+                await pilot.pause()
+
+                app.query_one("#recon-asset", Select).value = "__ASSET__:net"
+                app.query_one("#recon-scan-type", Select).value = "netsec"
+                app.query_one("#recon-run-tools", Select).value = False
+
+                await pilot.click("#btn-run-recon")
+                for _ in range(12):
+                    if mock_execute.called:
+                        break
+                    await pilot.pause()
+
+                self.assertTrue(mock_execute.called)
+                self.assertEqual(mock_execute.call_args.kwargs["network_id"], "gateway:10.0.0.1")
 
     async def test_host_and_finding_detail_panes_gain_scroll_range_for_long_content(self):
         with mock.patch("netpal.textual_ui.app._list_projects", return_value=[]):

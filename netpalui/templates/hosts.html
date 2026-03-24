@@ -1,24 +1,17 @@
 {% extends "base.html" %}
 {% block title %}Hosts | NetPal{% endblock %}
 {% block content %}
-<section class="page-header">
-    <div class="page-header-copy">
-        <p class="kicker">Hosts</p>
-        <h1>Discovered Hosts and Evidence</h1>
-        <p class="page-intro">Review discovered services, asset membership, proof files, and screenshots from the active project.</p>
-    </div>
-</section>
-
-<section class="grid two-up">
-    <section class="card">
+<section class="grid two-up hosts-layout">
+    <section class="card hosts-inventory">
         <p class="kicker">Inventory</p>
         <h2 class="card-title">Hosts</h2>
         {% if rows %}
         <div class="table-wrap">
-            <table class="data-table">
+            <table class="data-table host-table">
                 <thead>
                     <tr>
                         <th>Host</th>
+                        <th>Network</th>
                         <th>Asset</th>
                         <th>Services</th>
                         <th>Findings</th>
@@ -28,7 +21,8 @@
                 <tbody>
                     {% for row in rows %}
                     <tr>
-                        <td><a href="{{ url_for('hosts_page', host_id=row.host.host_id) }}">{{ row.label }}</a></td>
+                        <td><a class="host-link" href="{{ url_for('hosts_page', host_id=row.host.host_id) }}">{{ row.label }}</a></td>
+                        <td class="network-cell mono">{{ row.network }}</td>
                         <td>{{ row.asset_name }}</td>
                         <td>{{ row.services }}</td>
                         <td>{{ row.findings }}</td>
@@ -43,11 +37,26 @@
         {% endif %}
     </section>
 
-    <section class="card">
+    <section class="card hosts-detail">
         <p class="kicker">Detail</p>
         {% if selected_host_detail %}
-        <h2 class="card-title">{{ selected_host_detail.host.ip }}</h2>
-        <dl class="key-values">
+        <div class="detail-header host-detail-header">
+            <div class="host-detail-copy">
+                <h2 class="card-title">{{ selected_host_detail.host.ip }}</h2>
+                <p class="panel-copy">Service evidence is organized into preview cards so long outputs stay readable.</p>
+            </div>
+            <div class="tag-list">
+                <span class="tag">{{ selected_host_detail.service_count }} Services</span>
+                <span class="tag">{{ selected_host_detail.proof_count }} Proofs</span>
+            </div>
+        </div>
+        <dl class="key-values host-meta-grid">
+            {% if selected_host_detail.asset_names %}
+            <div>
+                <dt>Assets</dt>
+                <dd>{{ selected_host_detail.asset_names | join(", ") }}</dd>
+            </div>
+            {% endif %}
             {% if selected_host_detail.host.hostname %}
             <div>
                 <dt>Hostname</dt>
@@ -71,29 +80,41 @@
             {% for service_info in selected_host_detail.services %}
             <article class="service-card">
                 <div class="service-header">
-                    <strong>{{ service_info.service.port }}/{{ service_info.service.protocol }}</strong>
-                    <span>{{ service_info.service.service_name or "unknown" }}</span>
-                    {% if service_info.service.service_version %}
-                    <span class="mono">{{ service_info.service.service_version }}</span>
-                    {% endif %}
+                    <div class="service-title">
+                        <strong>{{ service_info.service.port }}/{{ service_info.service.protocol }}</strong>
+                        <span>{{ service_info.service.service_name or "unknown" }}</span>
+                        {% if service_info.service.service_version %}
+                        <span class="mono service-version">{{ service_info.service.service_version }}</span>
+                        {% endif %}
+                    </div>
+                    <div class="tag-list">
+                        <span class="tag">{{ service_info.proof_files | length }} Evidence</span>
+                    </div>
                 </div>
                 {% if service_info.service.extrainfo %}
-                <p class="panel-copy">{{ service_info.service.extrainfo }}</p>
+                <p class="panel-copy service-extra">{{ service_info.service.extrainfo }}</p>
                 {% endif %}
                 {% if service_info.proof_files %}
-                <div class="proof-grid">
+                <div class="proof-grid host-proof-grid">
                     {% for file in service_info.proof_files %}
-                    <article class="proof-card">
+                    <article class="proof-card proof-card-{{ file.type }}">
                         <div class="proof-meta">
                             <strong>{{ file.proof_type }}</strong>
-                            <span>{{ file.name }}</span>
+                            <span class="mono">{{ file.name }}</span>
+                        </div>
+                        <div class="proof-actions">
+                            <span class="tag">{{ file.type | upper }}</span>
+                            <a class="button quiet tiny" href="{{ url_for('serve_file', filepath=file.path) }}" target="_blank">Open file</a>
                         </div>
                         {% if file.type == "image" %}
                         <img class="proof-thumb screenshot-clickable" src="{{ url_for('serve_file', filepath=file.path) }}" alt="{{ file.name }}">
                         {% elif file.type in ["text", "jsonl"] %}
                         <pre class="proof-text">{{ file.content }}</pre>
+                        {% if file.is_truncated %}
+                        <p class="field-hint">Preview truncated. Open file for the full output.</p>
+                        {% endif %}
                         {% else %}
-                        <a class="button quiet" href="{{ url_for('serve_file', filepath=file.path) }}" target="_blank">Open file</a>
+                        <p class="field-hint">Binary or non-previewable evidence. Open the file to inspect it directly.</p>
                         {% endif %}
                     </article>
                     {% endfor %}

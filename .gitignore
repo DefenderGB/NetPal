@@ -59,3 +59,6 @@ temp/
 # Distribution
 *.tar.gz
 *.zip
+
+# AI/MCPs
+.playwright-cli

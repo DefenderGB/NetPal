@@ -9,6 +9,7 @@ from contextlib import contextmanager
 from types import SimpleNamespace
 from unittest import mock
 
+from netpal.models.asset import Asset
 from netpal.models.host import Host
 from netpal.models.project import Project
 from netpal.models.service import Service
@@ -24,6 +25,7 @@ from netpal.tui import (
     CreateProjectScreen,
     DeleteAssetScreen,
     DeleteProjectScreen,
+    EditAssetDescriptionScreen,
     EditProjectScreen,
     NetPalApp,
     SafeDataTable,
@@ -44,7 +46,7 @@ from netpal.utils.persistence.file_utils import (
 )
 from netpal.utils.persistence.project_utils import create_project_headless
 from netpal.utils.persistence.project_persistence import delete_finding_from_project
-from netpal.utils.scanning.scan_helpers import run_discovery_phase
+from netpal.utils.scanning.scan_helpers import execute_recon_scan, run_discovery_phase
 
 
 @contextmanager
@@ -124,8 +126,24 @@ class LocalOnlyParityTests(unittest.TestCase):
         self.assertTrue(issubclass(CreateProjectScreen, StandardModalScreen))
         self.assertTrue(issubclass(EditProjectScreen, StandardModalScreen))
         self.assertTrue(issubclass(CreateAssetScreen, StandardModalScreen))
+        self.assertTrue(issubclass(EditAssetDescriptionScreen, StandardModalScreen))
         self.assertTrue(issubclass(DeleteAssetScreen, StandardModalScreen))
         self.assertTrue(issubclass(DeleteProjectScreen, StandardModalScreen))
+
+    def test_asset_description_round_trips_through_dict(self):
+        asset = Asset(
+            asset_id=1,
+            asset_type="single",
+            name="Jump",
+            target="10.0.0.20",
+            description="Operator bastion",
+        )
+
+        data = asset.to_dict()
+        loaded = Asset.from_dict(data)
+
+        self.assertEqual(data["description"], "Operator bastion")
+        self.assertEqual(loaded.description, "Operator bastion")
 
     def test_tui_navigation_bindings_use_function_keys(self):
         bindings = {
@@ -782,6 +800,89 @@ class LocalOnlyParityTests(unittest.TestCase):
         self.assertEqual(scanner.calls, ["nmap-discovery", "port-discovery"])
         self.assertEqual(len(hosts), 1)
         self.assertEqual(hosts[0].ip, "10.0.0.40")
+
+    def test_execute_recon_scan_reuses_saved_network_for_single_ip_asset(self):
+        class FakeScanner:
+            def __init__(self):
+                self.network_ids = []
+
+            def scan_single(self, target, **kwargs):
+                self.network_ids.append(kwargs.get("network_id"))
+                return [Host(target, network_id=kwargs.get("network_id", "unknown"))], None
+
+        scanner = FakeScanner()
+        project = Project(name="Single Asset Context", project_id="NETP-TEST-SINGLE")
+        asset = SimpleNamespace(
+            asset_id=0,
+            type="single",
+            target="10.0.0.253",
+            get_identifier=lambda: "10.0.0.253",
+        )
+        project.hosts = [Host("10.0.0.253", network_id="gateway:10.0.0.1", assets=[0])]
+
+        hosts, error, _ = execute_recon_scan(
+            scanner,
+            asset,
+            project,
+            asset.get_identifier(),
+            interface="",
+            scan_type="netsec",
+            custom_ports="",
+            speed=3,
+            skip_discovery=True,
+            verbose=False,
+            exclude="",
+            exclude_ports="",
+            callback=None,
+            network_id="unknown",
+        )
+
+        self.assertIsNone(error)
+        self.assertEqual(scanner.network_ids, ["gateway:10.0.0.1"])
+        self.assertEqual(hosts[0].network_id, "gateway:10.0.0.1")
+
+    def test_execute_recon_scan_reuses_saved_network_for_single_host_target(self):
+        class FakeScanner:
+            def __init__(self):
+                self.network_ids = []
+
+            def scan_single(self, target, **kwargs):
+                self.network_ids.append(kwargs.get("network_id"))
+                return [Host(target, network_id=kwargs.get("network_id", "unknown"))], None
+
+        scanner = FakeScanner()
+        project = Project(name="Host Context", project_id="NETP-TEST-HOST")
+        asset = SimpleNamespace(
+            asset_id=0,
+            type="network",
+            network="10.0.0.0/24",
+            get_identifier=lambda: "10.0.0.0/24",
+        )
+        project.hosts = [
+            Host("10.0.0.253", network_id="gateway:10.0.0.1", assets=[0]),
+            Host("10.0.0.253", network_id="unknown", assets=[0]),
+        ]
+
+        hosts, error, _ = execute_recon_scan(
+            scanner,
+            asset,
+            project,
+            "10.0.0.253",
+            interface="",
+            scan_type="netsec",
+            custom_ports="",
+            speed=3,
+            skip_discovery=True,
+            verbose=False,
+            exclude="",
+            exclude_ports="",
+            callback=None,
+            network_id="unknown",
+        )
+
+        self.assertIsNone(error)
+        self.assertEqual(scanner.network_ids, ["gateway:10.0.0.1"])
+        self.assertEqual(hosts[0].network_id, "gateway:10.0.0.1")
 
 
 if __name__ == "__main__":

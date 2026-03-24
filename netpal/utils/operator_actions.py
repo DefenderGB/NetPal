@@ -482,11 +482,11 @@ def project_delete(identifier: str, config: dict | None = None) -> dict:
     return match
 
 
-def asset_create(project, asset_type: str, name: str, target_data):
+def asset_create(project, asset_type: str, name: str, target_data, description: str = ""):
     """Create and persist an asset for *project*."""
     from .asset_factory import create_asset_headless
 
-    return create_asset_headless(project, asset_type, name, target_data)
+    return create_asset_headless(project, asset_type, name, target_data, description=description)
 
 
 def asset_delete(project, asset_name: str):
@@ -494,6 +494,74 @@ def asset_delete(project, asset_name: str):
     from .asset_factory import delete_asset_headless
 
     return delete_asset_headless(project, asset_name)
+
+
+def asset_edit_description(project, asset_name: str, description: str = ""):
+    """Update an asset description and persist the project."""
+    if not project:
+        raise ValueError("Project is required.")
+
+    target_name = (asset_name or "").strip()
+    if not target_name:
+        raise ValueError("Asset name is required.")
+
+    asset = next((item for item in project.assets if item.name == target_name), None)
+    if asset is None:
+        raise ValueError(f"Asset '{target_name}' not found.")
+
+    asset.description = (description or "").strip()
+    save_project_to_file(project)
+    return asset
+
+
+def asset_edit(project, asset_name: str, *, name: str, description: str = "", target_data=None):
+    """Update an asset's name, target data, and description."""
+    if not project:
+        raise ValueError("Project is required.")
+
+    target_name = (asset_name or "").strip()
+    if not target_name:
+        raise ValueError("Asset name is required.")
+
+    asset = next((item for item in project.assets if item.name == target_name), None)
+    if asset is None:
+        raise ValueError(f"Asset '{target_name}' not found.")
+
+    new_name = (name or "").strip()
+    if not new_name:
+        raise ValueError("Asset name is required.")
+
+    for existing in project.assets:
+        if existing.asset_id == asset.asset_id:
+            continue
+        if existing.name.lower() == new_name.lower():
+            raise ValueError(f"An asset named '{existing.name}' already exists.")
+
+    from .asset_factory import AssetFactory
+
+    effective_target_data = target_data
+    if asset.type == "list" and effective_target_data in (None, ""):
+        asset.name = new_name
+        asset.description = (description or "").strip()
+        save_project_to_file(project)
+        return asset
+
+    updated = AssetFactory.create_asset(
+        asset.type,
+        new_name,
+        asset.asset_id,
+        effective_target_data,
+        project_id=project.project_id,
+        description=(description or "").strip(),
+    )
+
+    asset.name = updated.name
+    asset.description = updated.description
+    asset.network = updated.network
+    asset.target = updated.target
+    asset.file = updated.file
+    save_project_to_file(project)
+    return asset
 
 
 def finding_create(

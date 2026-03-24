@@ -10,6 +10,7 @@ def register_asset_tools(mcp):
         ctx: Context,
         asset_type: str,
         name: str,
+        description: str = "",
         cidr_range: str = "",
         targets: str = "",
         target: str = "",
@@ -29,9 +30,8 @@ def register_asset_tools(mcp):
             Dict with asset details.
         """
         from ..mcp_server import get_netpal_ctx
-        from ..utils.asset_factory import AssetFactory
+        from ..utils import operator_actions as actions
         from ..utils.validation import validate_target
-        from ..utils.persistence.project_persistence import save_project_to_file
 
         nctx = get_netpal_ctx(ctx)
         project = nctx.get_project()
@@ -59,38 +59,53 @@ def register_asset_tools(mcp):
         if asset_type == "single" and not target:
             raise ValueError("target is required for single type")
 
-        # Build a mock args namespace for AssetFactory
-        class Args:
-            pass
+        if asset_type == "network":
+            target_data = cidr_range
+        elif asset_type == "list":
+            target_data = {"file": file} if file else targets
+        else:
+            target_data = target
 
-        args = Args()
-        args.type = asset_type
-        args.name = name.strip()
-        args.range = cidr_range or None
-        args.targets = targets or None
-        args.target = target or None
-        args.file = file or None
-        args.external_id = None
-
-        try:
-            asset = AssetFactory.create_from_subcommand_args(args, project)
-        except ValueError as e:
-            raise ValueError(str(e))
+        asset = actions.asset_create(
+            project,
+            asset_type,
+            name.strip(),
+            target_data,
+            description=description,
+        )
 
         identifier = asset.get_identifier()
-        if not validate_target(identifier):
-            raise ValueError(f"Invalid target: {identifier}")
-
-        project.add_asset(asset)
-        save_project_to_file(project)
+        if asset_type in {"network", "single"}:
+            is_valid, _, error_message = validate_target(identifier)
+            if not is_valid:
+                raise ValueError(f"Invalid target: {error_message}")
 
         return {
             "asset_id": asset.asset_id,
             "name": asset.name,
             "type": asset.type,
             "identifier": identifier,
+            "description": asset.description,
             "project_name": project.name,
             "message": f"Asset '{asset.name}' ({asset.type}) created in project '{project.name}'.",
+        }
+
+    @mcp.tool()
+    def asset_edit_description(ctx: Context, asset_name: str, description: str = "") -> dict:
+        """Update the description on an asset in the active project."""
+        from ..mcp_server import get_netpal_ctx
+        from ..utils import operator_actions as actions
+
+        nctx = get_netpal_ctx(ctx)
+        project = nctx.get_project()
+        if not project:
+            raise ValueError("No active project.")
+
+        asset = actions.asset_edit_description(project, asset_name, description)
+        return {
+            "asset_name": asset.name,
+            "description": asset.description,
+            "message": f"Updated description for asset '{asset.name}'.",
         }
 
     @mcp.tool()

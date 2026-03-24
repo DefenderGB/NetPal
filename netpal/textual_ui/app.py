@@ -456,6 +456,10 @@ class CreateAssetScreen(StandardModalScreen):
                         yield Label("Name")
                         yield Input(id="new-asset-name", placeholder="e.g. DMZ Network")
                 with Horizontal():
+                    with Vertical():
+                        yield Label("Description (optional)")
+                        yield Input(id="new-asset-description", placeholder="Optional asset description")
+                with Horizontal():
                     with Vertical(id="new-asset-target-group"):
                         yield Label("Target data")
                         yield Input(id="new-asset-target", placeholder="e.g. 10.0.0.0/24")
@@ -520,6 +524,7 @@ class CreateAssetScreen(StandardModalScreen):
 
         asset_type = self.query_one("#new-asset-type", Select).value
         name = self.query_one("#new-asset-name", Input).value.strip()
+        description = self.query_one("#new-asset-description", Input).value.strip()
 
         if str(asset_type) == "list":
             file_path = self.query_one("#new-asset-file", Input).value.strip()
@@ -535,10 +540,52 @@ class CreateAssetScreen(StandardModalScreen):
             target_data = target
 
         try:
-            asset = create_asset_headless(project, str(asset_type), name, target_data)
+            asset = create_asset_headless(project, str(asset_type), name, target_data, description=description)
             self.dismiss(asset)
         except Exception as exc:
             status.update(f"[red]Error: {exc}[/]")
+
+
+class EditAssetDescriptionScreen(StandardModalScreen):
+    """Modal screen for editing an asset description."""
+
+    def __init__(self, asset, project) -> None:
+        super().__init__()
+        self._asset = asset
+        self._project = project
+
+    def compose(self) -> ComposeResult:
+        with Vertical(classes="modal-shell modal-wide compact-form"):
+            yield Static("Edit Asset Description", classes="section-title")
+            yield Label(f"Asset: {self._asset.name}")
+            yield Input(
+                id="edit-asset-description",
+                value=self._asset.description or "",
+                placeholder="Optional asset description",
+            )
+            yield StatusLine(id="edit-asset-description-status")
+            with ActionBar():
+                yield TextAction("Save", id="btn-do-edit-asset-description", variant="success")
+                yield TextAction("Cancel", id="btn-cancel-edit-asset-description", variant="default")
+
+    @on(TextAction.Pressed, "#btn-do-edit-asset-description")
+    def _handle_save(self, event: TextAction.Pressed) -> None:
+        from netpal.utils.operator_actions import asset_edit_description
+
+        status = self.query_one("#edit-asset-description-status", Static)
+        try:
+            asset = asset_edit_description(
+                self._project,
+                self._asset.name,
+                self.query_one("#edit-asset-description", Input).value,
+            )
+            self.dismiss(asset)
+        except Exception as exc:
+            status.update(f"[red]Error updating description: {exc}[/]")
+
+    @on(TextAction.Pressed, "#btn-cancel-edit-asset-description")
+    def _handle_cancel(self, event: TextAction.Pressed) -> None:
+        self.dismiss(None)
 
 
 class DeleteAssetScreen(StandardModalScreen):
@@ -993,6 +1040,7 @@ class AssetsView(BaseNetPalView):
                 yield SafeDataTable(id="asset-table")
                 with ActionBar(id="proj-action-bar"):
                     yield TextAction("Create Asset", id="btn-create-asset", variant="success")
+                    yield TextAction("Edit Description", id="btn-edit-asset-description", variant="primary")
                     yield TextAction("Delete Asset", id="btn-delete-asset", variant="error")
                 yield StatusLine(id="asset-status")
             yield DetailPane("Selected Asset", body_id="asset-detail", id="asset-detail-pane")
@@ -1015,6 +1063,7 @@ class AssetsView(BaseNetPalView):
             )
         )
         if not project or not project.assets:
+            self.query_one("#btn-edit-asset-description", TextAction).disabled = True
             detail.update("No assets available.\n\nCreate an asset to configure recon targets.")
             return
         for asset in project.assets:
@@ -1036,11 +1085,14 @@ class AssetsView(BaseNetPalView):
                             f"Type: {asset.type}",
                             f"Targets: {asset.get_identifier()}",
                             f"Associated Hosts: {len(asset.associated_host)}",
+                            f"Description: {asset.description or '(none)'}",
                         ]
                     )
                 )
+                self.query_one("#btn-edit-asset-description", TextAction).disabled = False
                 return
         self._selected_asset_name = None
+        self.query_one("#btn-edit-asset-description", TextAction).disabled = True
         detail.update("Select an asset to view details.")
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
@@ -1061,9 +1113,11 @@ class AssetsView(BaseNetPalView):
                     f"Type: {asset.type}",
                     f"Targets: {asset.get_identifier()}",
                     f"Associated Hosts: {len(asset.associated_host)}",
+                    f"Description: {asset.description or '(none)'}",
                 ]
             )
         )
+        self.query_one("#btn-edit-asset-description", TextAction).disabled = False
 
     @on(TextAction.Pressed, "#btn-create-asset")
     def _handle_create(self, event: TextAction.Pressed) -> None:
@@ -1071,7 +1125,32 @@ class AssetsView(BaseNetPalView):
 
     def _on_create_dismissed(self, asset) -> None:
         if asset is not None:
-            self.query_one("#asset-status", Static).update(f"[green]Created asset: {asset.name} ({asset.type})[/]")
+            detail = f"[green]Created asset: {asset.name} ({asset.type})[/]"
+            if asset.description:
+                detail += f"\n[dim]{asset.description}[/]"
+            self.query_one("#asset-status", Static).update(detail)
+            self.app.refresh_project_state()
+        self.refresh_view()
+        self.app.refresh()
+
+    @on(TextAction.Pressed, "#btn-edit-asset-description")
+    def _handle_edit_description(self, event: TextAction.Pressed) -> None:
+        project = self.app.project
+        if not project:
+            self.query_one("#asset-status", Static).update("[red]No active project.[/]")
+            return
+        asset = next((item for item in project.assets if item.name == self._selected_asset_name), None)
+        if not asset:
+            self.query_one("#asset-status", Static).update("[yellow]Select an asset to edit.[/]")
+            return
+        self.app.push_screen(EditAssetDescriptionScreen(asset, project), self._on_edit_description_dismissed)
+
+    def _on_edit_description_dismissed(self, asset) -> None:
+        if asset is not None:
+            rendered = asset.description or "(cleared)"
+            self.query_one("#asset-status", Static).update(
+                f"[green]Updated description for {asset.name}: {rendered}[/]"
+            )
             self.app.refresh_project_state()
         self.refresh_view()
         self.app.refresh()
@@ -1363,6 +1442,7 @@ class ReconView(BaseNetPalView):
                 from netpal.services.notification_service import NotificationService
                 from netpal.services.tools.tool_orchestrator import ToolOrchestrator as ToolRunner
                 from netpal.utils.config_loader import ConfigLoader
+                from netpal.utils.network_context import detect_network_context
                 from netpal.utils.persistence.project_persistence import save_findings_to_file, save_project_to_file
                 from netpal.utils.scanning.scan_helpers import (
                     execute_recon_scan,
@@ -1393,6 +1473,7 @@ class ReconView(BaseNetPalView):
                 exclude = form_exclude or config.get("exclude")
                 form_exclude_ports = self.query_one("#recon-exclude-ports", Input).value.strip()
                 exclude_ports = form_exclude_ports or config.get("exclude-ports")
+                network_context = detect_network_context(interface or "")
                 form_user_agent = self.query_one("#recon-user-agent", Input).value.strip()
                 if form_user_agent:
                     config["user-agent"] = form_user_agent
@@ -1413,6 +1494,7 @@ class ReconView(BaseNetPalView):
                         speed=speed,
                         output_callback=output_cb,
                         scan_type=str(scan_type),
+                        network_context=network_context,
                     )
                     error = None
                 elif all_ips:
@@ -1437,6 +1519,7 @@ class ReconView(BaseNetPalView):
                         _save_find,
                         rerun_autotools=rerun_autotools,
                         custom_ports=custom_opts,
+                        network_id=network_context.network_id,
                     )
                     error = None
                 else:
@@ -1454,6 +1537,7 @@ class ReconView(BaseNetPalView):
                         exclude,
                         exclude_ports,
                         output_cb,
+                        network_id=network_context.network_id,
                     )
 
                 if not all_ips:

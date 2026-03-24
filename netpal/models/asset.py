@@ -11,8 +11,8 @@ class Asset:
     a list of endpoints, or a single target.
     """
     
-    def __init__(self, asset_id, asset_type, name="", network="", target="", 
-                 file="", associated_host=None):
+    def __init__(self, asset_id, asset_type, name="", network="", target="",
+                 file="", associated_host=None, description=""):
         """
         Initialize an Asset.
         
@@ -24,6 +24,7 @@ class Asset:
             target: Single IP or hostname (for single type)
             file: Path to host list file (for list type)
             associated_host: List of host IDs that belong to this asset
+            description: Optional asset description
         """
         self.asset_id = asset_id
         self.type = asset_type
@@ -32,6 +33,7 @@ class Asset:
         self.target = target
         self.file = make_path_relative_to_scan_results(file) if file else ""
         self.associated_host = associated_host if associated_host is not None else []
+        self.description = description or ""
     
     def get_identifier(self):
         """
@@ -64,7 +66,9 @@ class Asset:
             data["target"] = self.target
         if self.file:
             data["file"] = self.file
-        
+        if self.description:
+            data["description"] = self.description
+
         return data
     
     @classmethod
@@ -77,5 +81,6 @@ class Asset:
             network=data.get("network", ""),
             target=data.get("target", ""),
             file=data.get("file", ""),
-            associated_host=data.get("associated_host", [])
+            associated_host=data.get("associated_host", []),
+            description=data.get("description", ""),
         )

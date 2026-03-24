@@ -27,8 +27,10 @@ Examples:
   netpal assets network --name DMZ --range "10.0.0.0/24"
   netpal assets list --name Servers --targets "web1.local,db1.local"
   netpal assets single --name WebApp --target 192.168.1.50
+  netpal assets single --name JumpHost --target 10.0.0.20 --description "External SSH pivot"
   netpal assets --list
   netpal assets --delete DMZ
+  netpal assets --edit-description JumpHost --description "Rotated to new bastion"
 
 Workflow:
   assets → recon → ai-review → ai-report-enhance → findings
@@ -267,10 +269,14 @@ def create_argument_parser():
     asset_parser.add_argument('-ts','--targets', help='Comma-separated target list or .txt file (list type)')
     asset_parser.add_argument('-t','--target', help='Single IP/hostname (single type)')
     asset_parser.add_argument('-f','--file', help='Path to host-list file (list type)')
+    asset_parser.add_argument('--description', default='',
+                              help='Optional asset description (use empty string with --edit-description to clear)')
     asset_parser.add_argument('-ei','--external-id', help='External tracking ID')
     asset_parser.add_argument('-l','--list', action='store_true', dest='list_assets',
                               help='List all assets in the active project')
     asset_parser.add_argument('-d','--delete', help='Delete asset by name')
+    asset_parser.add_argument('--edit-description',
+                              help='Edit an existing asset description by asset name')
     asset_parser.add_argument('--clear', action='store_true', dest='clear_orphans',
                               help='Remove hosts not tied to any asset')
 

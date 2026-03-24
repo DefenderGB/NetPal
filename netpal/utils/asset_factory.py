@@ -104,6 +104,7 @@ class AssetFactory:
         asset_id: int,
         target_data: Any,
         project_id: str = '',
+        description: str = "",
     ):
         """Create Asset object based on type.
         
@@ -138,7 +139,8 @@ class AssetFactory:
                 asset_id=asset_id,
                 asset_type='network',
                 name=name,
-                network=target_data
+                network=target_data,
+                description=description,
             )
         elif asset_type == 'list':
             # Handle both string and dict format for list assets
@@ -159,7 +161,8 @@ class AssetFactory:
                     asset_id=asset_id,
                     asset_type='list',
                     name=name,
-                    file=file_path
+                    file=file_path,
+                    description=description,
                 )
             else:
                 # Comma-separated hosts → write to file
@@ -170,7 +173,8 @@ class AssetFactory:
                     asset_id=asset_id,
                     asset_type='list',
                     name=name,
-                    file=file_path
+                    file=file_path,
+                    description=description,
                 )
         elif asset_type == 'single':
             from netpal.utils.validation import validate_target
@@ -181,7 +185,8 @@ class AssetFactory:
                 asset_id=asset_id,
                 asset_type='single',
                 name=name,
-                target=target_data
+                target=target_data,
+                description=description,
             )
         else:
             raise ValueError(f"Unknown asset type: {asset_type}")
@@ -216,6 +221,7 @@ class AssetFactory:
             return AssetFactory.create_asset(
                 'network', args.name, asset_id, args.range,
                 project_id=project.project_id,
+                description=getattr(args, "description", "") or "",
             )
         elif args.type == 'list':
             targets_val = getattr(args, 'targets', None)
@@ -232,11 +238,13 @@ class AssetFactory:
                 return AssetFactory.create_asset(
                     'list', args.name, asset_id, {'file': file_val},
                     project_id=project.project_id,
+                    description=getattr(args, "description", "") or "",
                 )
             elif targets_val:
                 return AssetFactory.create_asset(
                     'list', args.name, asset_id, targets_val,
                     project_id=project.project_id,
+                    description=getattr(args, "description", "") or "",
                 )
             else:
                 raise ValueError("--targets or --file is required for list type")
@@ -246,12 +254,13 @@ class AssetFactory:
             return AssetFactory.create_asset(
                 'single', args.name, asset_id, args.target,
                 project_id=project.project_id,
+                description=getattr(args, "description", "") or "",
             )
         else:
             raise ValueError(f"Unknown asset type: {args.type}")
 
 
-def create_asset_headless(project, asset_type, name, target_data):
+def create_asset_headless(project, asset_type, name, target_data, description: str = ""):
     """Create an asset, add it to the project, and save.
 
     This is the shared, UI-agnostic asset creation logic used by both
@@ -275,6 +284,7 @@ def create_asset_headless(project, asset_type, name, target_data):
     asset = AssetFactory.create_asset(
         str(asset_type), name, asset_id, target_data,
         project_id=project.project_id,
+        description=description,
     )
     project.add_asset(asset)
     save_project_to_file(project)

@@ -1,108 +1,153 @@
 {% extends "base.html" %}
-{% block title %}Assets | NetPal{% endblock %}
+{% block title %}Project | NetPal{% endblock %}
 {% block content %}
-<section class="page-header">
-    <div class="page-header-copy">
-        <p class="kicker">Assets</p>
-        <h1>Target Inventory</h1>
-        <p class="page-intro">Add network ranges, single hosts, or list files to the active project and inspect the hosts tied to each asset.</p>
+{% set return_to = request.full_path if request.query_string else request.path %}
+
+<section class="page-header compact-header">
+    <div class="page-header-copy compact-toolbar-copy">
+        <p class="kicker">Project</p>
+        <div class="title-with-tag">
+            <h1>{{ project.name }}</h1>
+            <span class="tag mono">{{ project.project_id }}</span>
+        </div>
+        <div class="tag-list">
+            {% if project.external_id %}<span class="tag">{{ project.external_id }}</span>{% endif %}
+            {% if project.ad_domain %}<span class="tag">{{ project.ad_domain }}</span>{% endif %}
+            {% if project.ad_dc_ip %}<span class="tag mono">{{ project.ad_dc_ip }}</span>{% endif %}
+        </div>
     </div>
     <div class="page-header-actions">
-        <button type="button" class="button" data-modal-open="create-asset-modal">Create Asset</button>
-        <a href="{{ url_for('recon_page') }}" class="button quiet">Open Recon</a>
+        <button type="button" class="button" data-modal-open="edit-active-project-modal">Edit Project</button>
+        <button type="button" class="button quiet" data-modal-open="create-asset-modal">Create Asset</button>
+        <form class="inline-form" action="{{ url_for('project_delete', project_id=project.project_id) }}" method="post" onsubmit="return confirm('Delete this project and all local data?');">
+            <button class="button danger" type="submit">Delete Project</button>
+        </form>
     </div>
 </section>
 
-<section class="grid two-up">
-    <section class="card">
-        <p class="kicker">Inventory</p>
-        <h2 class="card-title">Assets in the Active Project</h2>
-        {% if active_project and active_project.assets %}
-        <div class="project-list">
-            {% for asset in active_project.assets %}
-            <article class="project-row{% if selected_asset and selected_asset.name == asset.name %} is-active-row{% endif %}">
-                <div class="project-main">
-                    <div class="project-top">
-                        <h3>{{ asset.name }}</h3>
-                        <div class="tag-list">
-                            <span class="tag">{{ asset.type }}</span>
-                            {% if asset.network %}<span class="tag mono">{{ asset.network }}</span>{% endif %}
-                            {% if asset.target %}<span class="tag mono">{{ asset.target }}</span>{% endif %}
-                            {% if asset.file %}<span class="tag mono">{{ asset.file }}</span>{% endif %}
-                        </div>
-                    </div>
-                    <p class="field-hint">Linked hosts: {{ asset.associated_host | length }}</p>
-                </div>
-                <div class="button-row">
-                    <a href="{{ url_for('assets_page', asset=asset.name) }}" class="button quiet">Inspect</a>
-                    <form class="inline-form" action="{{ url_for('asset_delete') }}" method="post" onsubmit="return confirm('Delete this asset?');">
-                        <input type="hidden" name="asset_name" value="{{ asset.name }}">
-                        <button class="button danger" type="submit">Delete</button>
-                    </form>
-                </div>
-            </article>
-            {% endfor %}
+<section class="grid two-up project-workspace-grid">
+    <section class="card compact-card">
+        <div class="section-row compact-section-row">
+            <div>
+                <p class="kicker">Project Info</p>
+                <h2 class="card-title">Metadata</h2>
+            </div>
         </div>
-        {% else %}
-        <p class="field-hint">No assets yet.</p>
-        {% endif %}
+        <dl class="tight-key-values">
+            <div>
+                <dt>Name</dt>
+                <dd>{{ project.name }}</dd>
+            </div>
+            <div>
+                <dt>Project ID</dt>
+                <dd class="mono">{{ project.project_id }}</dd>
+            </div>
+            <div>
+                <dt>External ID</dt>
+                <dd>{{ project.external_id or "-" }}</dd>
+            </div>
+            <div>
+                <dt>AD Domain</dt>
+                <dd>{{ project.ad_domain or "-" }}</dd>
+            </div>
+            <div>
+                <dt>DC IP / Hostname</dt>
+                <dd class="mono">{{ project.ad_dc_ip or "-" }}</dd>
+            </div>
+            <div>
+                <dt>Description</dt>
+                <dd>{{ project.description or "-" }}</dd>
+            </div>
+        </dl>
     </section>
 
-    <section class="card">
-        <p class="kicker">Selected</p>
-        {% if selected_asset %}
-        <h2 class="card-title">{{ selected_asset.name }}</h2>
-        <div class="tag-list">
-            <span class="tag">{{ selected_asset.type }}</span>
-            {% if selected_asset.network %}<span class="tag mono">{{ selected_asset.network }}</span>{% endif %}
-            {% if selected_asset.target %}<span class="tag mono">{{ selected_asset.target }}</span>{% endif %}
-            {% if selected_asset.file %}<span class="tag mono">{{ selected_asset.file }}</span>{% endif %}
-        </div>
-        <dl class="key-values">
+    <section class="card compact-card">
+        <div class="section-row compact-section-row">
             <div>
-                <dt>Asset ID</dt>
-                <dd>{{ selected_asset.asset_id }}</dd>
+                <p class="kicker">Summary</p>
+                <h2 class="card-title">Operational Snapshot</h2>
             </div>
-            <div>
-                <dt>Linked Hosts</dt>
-                <dd>{{ selected_asset.associated_host | length }}</dd>
-            </div>
-            {% if selected_asset.file %}
-            <div>
-                <dt>List File</dt>
-                <dd><a href="{{ url_for('serve_file', filepath=selected_asset.file) }}" target="_blank">{{ selected_asset.file }}</a></dd>
-            </div>
-            {% endif %}
-        </dl>
-        <div class="button-row">
-            <form class="inline-form" action="{{ url_for('asset_delete') }}" method="post" onsubmit="return confirm('Delete this asset?');">
-                <input type="hidden" name="asset_name" value="{{ selected_asset.name }}">
-                <button class="button danger" type="submit">Delete Asset</button>
-            </form>
         </div>
-        <div class="stack">
-            {% set ns = namespace(found=false) %}
-            {% for host in active_project.hosts %}
-                {% if selected_asset.asset_id in host.assets %}
-                    {% set ns.found = true %}
-                    <article class="compact-row detail-row">
-                        <div>
-                            <strong>{{ host.ip }}</strong>
-                            {% if host.hostname %}<span class="mono">{{ host.hostname }}</span>{% endif %}
-                        </div>
-                        <span class="tag">Services: {{ host.services | length }}</span>
-                    </article>
-                {% endif %}
-            {% endfor %}
-            {% if not ns.found %}
-            <p class="field-hint">No hosts associated with this asset yet.</p>
-            {% endif %}
+        <div class="compact-metric-row">
+            <article class="metric-chip">
+                <span>Assets</span>
+                <strong>{{ project_metrics.assets }}</strong>
+            </article>
+            <article class="metric-chip">
+                <span>Hosts</span>
+                <strong>{{ project_metrics.hosts }}</strong>
+            </article>
+            <article class="metric-chip">
+                <span>Services</span>
+                <strong>{{ project_metrics.services }}</strong>
+            </article>
+            <article class="metric-chip">
+                <span>Findings</span>
+                <strong>{{ project_metrics.findings }}</strong>
+            </article>
+            <article class="metric-chip">
+                <span>Test Cases</span>
+                <strong>{{ project_metrics.testcases }}</strong>
+            </article>
         </div>
-        {% else %}
-        <h2 class="card-title">No asset selected</h2>
-        <p class="panel-copy">Choose an asset below to inspect it.</p>
-        {% endif %}
+        <div class="button-row compact-button-row">
+            <a class="button quiet" href="{{ url_for('hosts_page') }}">Hosts</a>
+            <a class="button quiet" href="{{ url_for('tools_page') }}">Tools</a>
+            <a class="button quiet" href="{{ url_for('recon_page') }}">Recon</a>
+            <a class="button quiet" href="{{ url_for('findings_page') }}">Findings</a>
+        </div>
     </section>
+</section>
+
+<section class="card compact-card">
+    <div class="section-row compact-section-row">
+        <div>
+            <p class="kicker">Assets</p>
+            <h2 class="card-title">Asset Inventory</h2>
+        </div>
+        <button type="button" class="button tiny" data-modal-open="create-asset-modal">Create Asset</button>
+    </div>
+    {% if project_highlights.asset_rows %}
+    <div class="compact-list">
+        {% for row in project_highlights.asset_rows %}
+        <article class="compact-list-row asset-list-row">
+            <div>
+                <strong>{{ row.asset.name }}</strong>
+                <p class="field-hint compact-copy">
+                    {{ row.asset.type }}
+                    {% if row.asset.network %} | {{ row.asset.network }}{% endif %}
+                    {% if row.asset.target %} | {{ row.asset.target }}{% endif %}
+                    {% if row.asset.file %} | {{ row.asset.file }}{% endif %}
+                </p>
+                {% if row.asset.description %}
+                <p class="compact-copy">{{ row.asset.description }}</p>
+                {% endif %}
+            </div>
+            <div class="asset-row-side">
+                <div class="compact-stats">
+                    <span>{{ row.host_count }} hosts</span>
+                    <span>{{ row.service_count }} services</span>
+                    <span>{{ row.finding_count }} findings</span>
+                </div>
+                <div class="circle-actions">
+                    <button type="button" class="circle-action is-yellow" data-modal-open="edit-asset-{{ row.asset.asset_id }}" title="Edit asset">✏</button>
+                    <form class="inline-form" action="{{ url_for('asset_delete') }}" method="post" onsubmit="return confirm('Delete this asset?');">
+                        <input type="hidden" name="asset_name" value="{{ row.asset.name }}">
+                        <input type="hidden" name="return_to" value="{{ return_to }}">
+                        <button class="circle-action is-red" type="submit" title="Delete asset">X</button>
+                    </form>
+                </div>
+            </div>
+        </article>
+        {% endfor %}
+    </div>
+    {% else %}
+    <div class="empty-stage compact-empty">
+        <h2>No assets yet</h2>
+        <p>Add a network, single host, or list-backed asset to define project scope.</p>
+        <button type="button" class="button" data-modal-open="create-asset-modal">Create Asset</button>
+    </div>
+    {% endif %}
 </section>
 
 <div id="create-asset-modal" class="modal-shell" hidden>
@@ -117,6 +162,7 @@
             <button type="button" class="modal-close" data-modal-close="create-asset-modal">&times;</button>
         </div>
         <form action="{{ url_for('asset_create') }}" method="post" data-asset-form="asset-create">
+            <input type="hidden" name="return_to" value="{{ return_to }}">
             <div class="form-grid">
                 <label class="field">
                     <span>Asset Type</span>
@@ -129,6 +175,10 @@
                 <label class="field">
                     <span>Name</span>
                     <input class="input" type="text" name="name" required>
+                </label>
+                <label class="field full-span">
+                    <span>Description</span>
+                    <textarea class="textarea" name="description" rows="3" placeholder="Optional asset description"></textarea>
                 </label>
                 <label class="field full-span" data-asset-target-group>
                     <span>Target</span>
@@ -151,4 +201,66 @@
         </form>
     </div>
 </div>
+
+{% for row in project_highlights.asset_rows %}
+<div id="edit-asset-{{ row.asset.asset_id }}" class="modal-shell" hidden>
+    <div class="modal-backdrop" data-modal-close="edit-asset-{{ row.asset.asset_id }}"></div>
+    <div class="modal-card medium">
+        <div class="modal-header">
+            <div>
+                <p class="kicker">Edit</p>
+                <h2 class="card-title">{{ row.asset.name }}</h2>
+                <p class="panel-copy">Update asset metadata and scope details.</p>
+            </div>
+            <button type="button" class="modal-close" data-modal-close="edit-asset-{{ row.asset.asset_id }}">&times;</button>
+        </div>
+        <form action="{{ url_for('asset_edit') }}" method="post">
+            <input type="hidden" name="asset_name" value="{{ row.asset.name }}">
+            <input type="hidden" name="return_to" value="{{ return_to }}">
+            <div class="form-grid">
+                <label class="field">
+                    <span>Asset Type</span>
+                    <input class="input" type="text" value="{{ row.asset.type }}" disabled>
+                </label>
+                <label class="field">
+                    <span>Name</span>
+                    <input class="input" type="text" name="name" value="{{ row.asset.name }}" required>
+                </label>
+                <label class="field full-span">
+                    <span>Description</span>
+                    <textarea class="textarea" name="description" rows="3">{{ row.asset.description or '' }}</textarea>
+                </label>
+                {% if row.asset.type == "network" %}
+                <label class="field full-span">
+                    <span>Network</span>
+                    <input class="input" type="text" name="target" value="{{ row.asset.network }}" required>
+                </label>
+                {% elif row.asset.type == "single" %}
+                <label class="field full-span">
+                    <span>Target</span>
+                    <input class="input" type="text" name="target" value="{{ row.asset.target }}" required>
+                </label>
+                {% else %}
+                <label class="field full-span">
+                    <span>Replace Targets (Optional)</span>
+                    <textarea class="textarea" name="targets" rows="4" placeholder="Leave blank to keep the current list file"></textarea>
+                </label>
+                <label class="field full-span">
+                    <span>Or Replace From .txt Path</span>
+                    <input class="input" type="text" name="file_path" data-path-suggest="true" data-suggest-target="asset-edit-suggestions-{{ row.asset.asset_id }}" placeholder="/tmp/targets.txt">
+                    <div id="asset-edit-suggestions-{{ row.asset.asset_id }}" class="suggestion-list"></div>
+                    {% if row.asset.file %}
+                    <p class="field-hint compact-copy">Current file: <span class="mono">{{ row.asset.file }}</span></p>
+                    {% endif %}
+                </label>
+                {% endif %}
+            </div>
+            <div class="button-row">
+                <button class="button" type="submit">Save Asset</button>
+                <button class="button quiet" type="button" data-modal-close="edit-asset-{{ row.asset.asset_id }}">Cancel</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endfor %}
 {% endblock %}

@@ -1,14 +1,6 @@
 {% extends "base.html" %}
 {% block title %}Settings | NetPal{% endblock %}
 {% block content %}
-<section class="page-header">
-    <div class="page-header-copy">
-        <p class="kicker">Settings</p>
-        <h1>JSON Configuration</h1>
-        <p class="page-intro">Edit the shared JSON documents used by NetPal. Credentials stay on the dedicated Credentials page.</p>
-    </div>
-</section>
-
 <section class="card">
     <div class="tab-row">
         {% for settings_file in settings_files %}

@@ -7,37 +7,35 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
+    {% set return_to = request.full_path if request.query_string else request.path %}
     <div class="site-shell">
         <header class="topbar">
             <div class="topbar-main">
-                <div class="brand-block">
-                    <a href="{{ url_for('projects_page') }}" class="brand">NetPal</a>
-                    <p class="brand-copy">Operator console for local projects, recon, findings, credentials, and evidence.</p>
-                </div>
+                <a href="{{ url_for('projects_page') }}" class="brand">NetPal</a>
                 {% if active_project %}
                 <div class="topbar-signal">
-                    <div class="signal-title">
-                        <span class="project-pill-label">Active Project</span>
+                    <div class="signal-title signal-inline">
+                        <span class="signal-inline-label">Active Project:</span>
                         <strong>{{ active_project.name }}</strong>
-                        <span class="mono">{{ active_project.project_id }}</span>
+                        <span class="mono">({{ active_project.project_id }})</span>
                     </div>
                     <div class="signal-metrics">
                         <span><strong>{{ active_metrics.assets }}</strong> Assets</span>
                         <span><strong>{{ active_metrics.hosts }}</strong> Hosts</span>
                         <span><strong>{{ active_metrics.services }}</strong> Services</span>
                         <span><strong>{{ active_metrics.findings }}</strong> Findings</span>
+                        <span><strong>{{ active_metrics.proofs }}</strong> Proofs</span>
                     </div>
                 </div>
                 {% else %}
                 <div class="topbar-signal is-empty">
-                    <span class="project-pill-label">Active Project</span>
+                    <span class="signal-inline-label">Active Project:</span>
                     <strong>No active project selected</strong>
                 </div>
                 {% endif %}
             </div>
             <div class="topbar-actions">
                 {% if active_project %}
-                <a href="{{ url_for('project_overview', project_id=active_project.project_id) }}" class="ghost-link">Overview</a>
                 <button type="button" class="ghost-link ghost-button" data-modal-open="edit-active-project-modal">Edit Project</button>
                 {% endif %}
                 <a href="{{ request.url }}" class="ghost-link">Refresh</a>
@@ -64,60 +62,9 @@
             {% endif %}
         {% endwith %}
 
-        <div class="page-shell">
-            <aside class="project-rail">
-                <div class="project-rail-head">
-                    <div>
-                        <p class="kicker">Projects</p>
-                        <h2 class="rail-title">Engagements</h2>
-                    </div>
-                    <button type="button" class="button project-rail-button" data-modal-open="create-project-modal">Create Project</button>
-                </div>
-
-                <div class="project-nav-list">
-                    {% if sidebar_projects %}
-                        {% for item in sidebar_projects %}
-                        <article class="project-nav-item{% if item.id == current_project_id %} is-current{% endif %}{% if active_project and active_project.project_id == item.id %} is-active{% endif %}">
-                            <a href="{{ url_for('projects_page', selected=item.id) }}" class="project-nav-main">
-                                <div class="project-nav-top">
-                                    <strong class="project-nav-title">{{ item.name }}</strong>
-                                    {% if active_project and active_project.project_id == item.id %}
-                                    <span class="active-dot">Active</span>
-                                    {% endif %}
-                                </div>
-                                <span class="mono project-nav-id">{{ item.id }}</span>
-                                {% if item.description %}
-                                <span class="project-nav-copy">{{ item.description }}</span>
-                                {% endif %}
-                                <span class="project-nav-updated">Updated {{ item.updated_str }}</span>
-                            </a>
-                            <div class="project-nav-actions">
-                                <a href="{{ url_for('project_overview', project_id=item.id) }}" class="micro-link">Overview</a>
-                                {% if active_project and active_project.project_id == item.id %}
-                                <button type="button" class="micro-button" data-modal-open="edit-active-project-modal">Edit</button>
-                                {% endif %}
-                                {% if not active_project or active_project.project_id != item.id %}
-                                <form class="inline-form" action="{{ url_for('project_activate') }}" method="post">
-                                    <input type="hidden" name="identifier" value="{{ item.id }}">
-                                    <button type="submit" class="micro-button">Use</button>
-                                </form>
-                                {% endif %}
-                            </div>
-                        </article>
-                        {% endfor %}
-                    {% else %}
-                    <div class="empty-rail">
-                        <p>No projects yet.</p>
-                        <button type="button" class="button secondary" data-modal-open="create-project-modal">Start your first project</button>
-                    </div>
-                    {% endif %}
-                </div>
-            </aside>
-
-            <main class="content-area">
-                {% block content %}{% endblock %}
-            </main>
-        </div>
+        <main class="content-area">
+            {% block content %}{% endblock %}
+        </main>
     </div>
 
     <div id="create-project-modal" class="modal-shell" hidden>
@@ -132,6 +79,7 @@
                 <button type="button" class="modal-close" data-modal-close="create-project-modal">&times;</button>
             </div>
             <form action="{{ url_for('project_create') }}" method="post" data-asset-form="starter">
+                <input type="hidden" name="return_to" value="{{ return_to }}">
                 <div class="form-grid">
                     <label class="field">
                         <span>Project Name</span>
@@ -188,6 +136,7 @@
                 <button type="button" class="modal-close" data-modal-close="edit-active-project-modal">&times;</button>
             </div>
             <form action="{{ url_for('project_edit', project_id=active_project.project_id) }}" method="post">
+                <input type="hidden" name="return_to" value="{{ return_to }}">
                 <div class="form-grid">
                     <label class="field">
                         <span>Project Name</span>

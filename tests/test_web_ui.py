@@ -1,4 +1,5 @@
 import csv
+import io
 import json
 import os
 import sys
@@ -93,7 +94,7 @@ class WebUITests(unittest.TestCase):
             ad_domain="corp.local",
             ad_dc_ip="10.0.0.1",
         )
-        asset = create_asset_headless(project, "network", "DMZ", "10.0.0.0/24")
+        asset = create_asset_headless(project, "network", "DMZ", "10.0.0.0/24", description="Initial DMZ scope")
 
         proof_rel = os.path.join(project.project_id, "evidence", "proof.txt")
         proof_abs = os.path.join(self.scan_results_dir.name, proof_rel)
@@ -179,7 +180,7 @@ class WebUITests(unittest.TestCase):
         self.assertIn("Project &#39;Client One&#39; created", page)
         self.assertIn("Active Project", page)
         self.assertIn('data-modal-open="edit-active-project-modal"', page)
-        self.assertIn('id="edit-selected-project-modal"', page)
+        self.assertIn('id="edit-project-', page)
 
         config = self._read_json("config.json")
         self.assertEqual(config["project_name"], "Client One")
@@ -192,14 +193,57 @@ class WebUITests(unittest.TestCase):
     def test_asset_and_finding_mutations_persist_through_shared_actions(self):
         seeded = self._seed_project()
 
+        response = self.client.get("/project", follow_redirects=True)
+        self.assertEqual(response.status_code, 200)
+        page = response.get_data(as_text=True)
+        self.assertIn("Asset Inventory", page)
+        self.assertIn("Initial DMZ scope", page)
+
         response = self.client.post(
             "/assets/create",
-            data={"asset_type": "single", "name": "Jump Host", "target": "10.0.0.20"},
+            data={
+                "asset_type": "single",
+                "name": "Jump Host",
+                "target": "10.0.0.20",
+                "description": "Initial jump box",
+            },
             follow_redirects=True,
         )
         self.assertEqual(response.status_code, 200)
         active_project = self._load_active_project()
         self.assertEqual(len(active_project.assets), 2)
+        created_asset = next((asset for asset in active_project.assets if asset.name == "Jump Host"), None)
+        self.assertIsNotNone(created_asset)
+        self.assertEqual(created_asset.description, "Initial jump box")
+
+        response = self.client.post(
+            "/assets/edit",
+            data={
+                "asset_name": "Jump Host",
+                "name": "Jump Host Renamed",
+                "description": "Updated jump box",
+                "target": "10.0.0.21",
+            },
+            follow_redirects=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        active_project = self._load_active_project()
+        updated_asset = next((asset for asset in active_project.assets if asset.asset_id != seeded.asset.asset_id), None)
+        self.assertIsNotNone(updated_asset)
+        self.assertEqual(updated_asset.name, "Jump Host Renamed")
+        self.assertEqual(updated_asset.target, "10.0.0.21")
+        self.assertEqual(updated_asset.description, "Updated jump box")
+
+        response = self.client.post(
+            "/assets/edit-description",
+            data={"asset_name": "Jump Host Renamed", "description": "Jump box for operators only"},
+            follow_redirects=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        active_project = self._load_active_project()
+        updated_asset = next((asset for asset in active_project.assets if asset.asset_id != seeded.asset.asset_id), None)
+        self.assertIsNotNone(updated_asset)
+        self.assertEqual(updated_asset.description, "Jump box for operators only")
 
         created_host = active_project.hosts[0]
         response = self.client.post(
@@ -234,7 +278,7 @@ class WebUITests(unittest.TestCase):
 
         response = self.client.post(
             "/assets/delete",
-            data={"asset_name": "Jump Host"},
+            data={"asset_name": "Jump Host Renamed"},
             follow_redirects=True,
         )
         self.assertEqual(response.status_code, 200)
@@ -317,40 +361,60 @@ class WebUITests(unittest.TestCase):
         self.assertIn('id="create-finding-modal"', page)
         self.assertIn("Seeded Finding", page)
 
+    def test_hosts_page_shows_network_assets_and_truncated_proof_previews(self):
+        seeded = self._seed_project()
+        seeded.project.hosts[0].network_id = "gateway:10.0.0.1"
+        proof_abs = os.path.join(self.scan_results_dir.name, seeded.proof_rel)
+        with open(proof_abs, "w", encoding="utf-8") as handle:
+            handle.write("\n".join(f"line {index}" for index in range(160)))
+        save_project_to_file(seeded.project)
+
+        response = self.client.get("/hosts")
+        self.assertEqual(response.status_code, 200)
+        page = response.get_data(as_text=True)
+        self.assertIn("<th>Network</th>", page)
+        self.assertIn("gateway:10.0.0.1", page)
+        self.assertIn("Assets</dt>", page)
+        self.assertIn("DMZ", page)
+        self.assertIn("1 Services", page)
+        self.assertIn("2 Proofs", page)
+        self.assertIn("Preview truncated. Open file for the full output.", page)
+
     def test_testcase_load_and_update_routes_persist_registry(self):
         seeded = self._seed_project()
-        csv_path = os.path.join(self.scan_results_dir.name, "cases.csv")
-        with open(csv_path, "w", newline="", encoding="utf-8") as handle:
-            writer = csv.DictWriter(
-                handle,
-                fieldnames=[
-                    "Phase",
-                    "Category",
-                    "Test Name",
-                    "Description",
-                    "Requirement",
-                    "Severity Guidance",
-                    "MITRE",
-                    "CWE",
-                ],
-            )
-            writer.writeheader()
-            writer.writerow(
-                {
-                    "Phase": "Recon",
-                    "Category": "Web",
-                    "Test Name": "Banner Grab",
-                    "Description": "Collect banners",
-                    "Requirement": "Required",
-                    "Severity Guidance": "Medium",
-                    "MITRE": "",
-                    "CWE": "",
-                }
-            )
+        csv_buffer = io.StringIO()
+        writer = csv.DictWriter(
+            csv_buffer,
+            fieldnames=[
+                "Phase",
+                "Category",
+                "Test Name",
+                "Description",
+                "Requirement",
+                "Severity Guidance",
+                "MITRE",
+                "CWE",
+            ],
+        )
+        writer.writeheader()
+        writer.writerow(
+            {
+                "Phase": "Recon",
+                "Category": "Web",
+                "Test Name": "Banner Grab",
+                "Description": "Collect banners",
+                "Requirement": "Required",
+                "Severity Guidance": "Medium",
+                "MITRE": "",
+                "CWE": "",
+            }
+        )
+        csv_bytes = io.BytesIO(csv_buffer.getvalue().encode("utf-8"))
 
         response = self.client.post(
             "/testcases",
-            data={"action_name": "load_csv", "csv_path": csv_path},
+            data={"action_name": "load_csv", "csv_file": (csv_bytes, "cases.csv")},
+            content_type="multipart/form-data",
             follow_redirects=True,
         )
         self.assertEqual(response.status_code, 200)
@@ -373,6 +437,9 @@ class WebUITests(unittest.TestCase):
             registry = json.load(handle)
         self.assertEqual(registry["test_cases"][testcase_id]["status"], "passed")
         self.assertEqual(registry["test_cases"][testcase_id]["notes"], "Verified from the web UI")
+        uploads_dir = os.path.join(self.scan_results_dir.name, seeded.project.project_id, "uploads")
+        self.assertTrue(os.path.isdir(uploads_dir))
+        self.assertTrue(any(name.endswith(".csv") for name in os.listdir(uploads_dir)))
 
     def test_secure_file_serving_allows_project_files_and_blocks_traversal(self):
         seeded = self._seed_project()

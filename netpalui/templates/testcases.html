@@ -1,23 +1,15 @@
 {% extends "base.html" %}
 {% block title %}Test Cases | NetPal{% endblock %}
 {% block content %}
-<section class="page-header">
-    <div class="page-header-copy">
-        <p class="kicker">Test Cases</p>
-        <h1>Checklist Tracking</h1>
-        <p class="page-intro">Load a CSV into the project-local testcase registry, filter by category or status, and update execution notes.</p>
-    </div>
-</section>
-
 <section class="grid two-up">
-    <form class="card" action="{{ url_for('testcases_page') }}" method="post">
+    <form class="card" action="{{ url_for('testcases_page') }}" method="post" enctype="multipart/form-data">
         <input type="hidden" name="action_name" value="load_csv">
         <p class="kicker">Load</p>
         <h2 class="card-title">Import CSV</h2>
         <label class="field">
-            <span>CSV Path</span>
-            <input class="input" type="text" name="csv_path" data-path-suggest="true" data-suggest-target="tc-csv-suggestions" placeholder="/tmp/testcases.csv">
-            <div id="tc-csv-suggestions" class="suggestion-list"></div>
+            <span>CSV File</span>
+            <input class="input file-input" type="file" name="csv_file" accept=".csv,text/csv" required>
+            <p class="field-hint">Choose a local testcase CSV to load into this project.</p>
         </label>
         <div class="button-row">
             <button class="button" type="submit">Load Test Cases</button>
@@ -25,8 +17,12 @@
     </form>
 
     <section class="card">
-        <p class="kicker">Summary</p>
-        <h2 class="card-title">Registry Counts</h2>
+        <div class="section-row compact-section-row">
+            <div>
+                <p class="kicker">Summary</p>
+                <h2 class="card-title">Registry Counts</h2>
+            </div>
+        </div>
         <div class="metric-grid compact-metrics">
             <article class="metric-tile">
                 <span>Total</span>
